@@ -2,6 +2,8 @@
 
 Python-парсер для поиска Telegram-чатов и каналов, анализа их аудитории и экспорта статистики в Excel. Проект собирает данные об участниках, пользователях онлайн, сообщениях за последние сутки и активности голосовых чатов.
 
+[Telegram](https://t.me/digitalhorizongroup) · [Discord](https://discord.com/invite/fjqzSYCETC)
+
 ## Возможности
 
 - Поиск публичных Telegram-чатов и каналов по ключевым словам
@@ -65,5 +67,3 @@ python run.py
 ## Участие в разработке
 
 Нашли ошибку или хотите предложить улучшение? [Создайте issue](https://github.com/digitalhorizongroup/Parser_telegram_chat/issues) или отправьте pull request.
-
-Если у вас есть вопросы или предложения, пишите в [Telegram](https://t.me/digitalhorizongroup) или [Discord](https://discord.com/invite/fjqzSYCETC) 🚀
