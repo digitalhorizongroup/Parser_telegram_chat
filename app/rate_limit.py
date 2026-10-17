@@ -9,6 +9,12 @@ from telethon.errors import FloodWaitError
 logger = logging.getLogger(__name__)
 
 
+class AccountCooldownError(Exception):
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+        super().__init__(f"Аккаунт ограничен Telegram ещё на {seconds} сек.")
+
+
 class TelegramLimiter:
     def __init__(self, concurrency: int = 3, delay: float = 0.35, retries: int = 4):
         self.semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -16,6 +22,7 @@ class TelegramLimiter:
         self.retries = max(0, retries)
         self._lock = asyncio.Lock()
         self._last_call = 0.0
+        self._blocked_until = 0.0
 
     async def _pace(self):
         async with self._lock:
@@ -25,6 +32,9 @@ class TelegramLimiter:
             self._last_call = time.monotonic()
 
     async def call(self, operation: Callable[[], Awaitable]):
+        remaining = int(self._blocked_until - time.monotonic())
+        if remaining > 0:
+            raise AccountCooldownError(remaining)
         for attempt in range(self.retries + 1):
             try:
                 async with self.semaphore:
@@ -32,6 +42,10 @@ class TelegramLimiter:
                     return await operation()
             except FloodWaitError as exc:
                 wait = max(1, exc.seconds) + random.uniform(0, 1)
+                if wait > 120:
+                    self._blocked_until = time.monotonic() + wait
+                    logger.error("Telegram FloodWait %s сек.; аккаунт переведён в cooldown без ожидания", exc.seconds)
+                    raise AccountCooldownError(exc.seconds) from exc
                 logger.warning("Telegram FloodWait: ожидание %.1f с", wait)
                 await asyncio.sleep(wait)
             except (ConnectionError, TimeoutError):

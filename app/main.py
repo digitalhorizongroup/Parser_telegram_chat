@@ -95,7 +95,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
         limiters = [TelegramLimiter(1, REQUEST_DELAY, REQUEST_RETRIES) for _ in active_clients]
         logger.info("Активных сессий: %s", len(active_clients))
         update_progress(phase="searching", phase_label="Поиск сообществ", active_sessions=len(active_clients), current="Telegram search")
-        groups = await search_groups(active_clients[0], limiters[0])
+        groups = await search_groups(active_clients, limiters)
         db.set_total(run_id, len(groups))
         processed = db.processed_ids(run_id)
         completed_count = len(processed)

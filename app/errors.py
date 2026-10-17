@@ -6,10 +6,11 @@ from telethon.errors import (
 )
 
 from app.models import ErrorKind
+from app.rate_limit import AccountCooldownError
 
 
 def classify_error(exc: Exception) -> ErrorKind:
-    if isinstance(exc, FloodWaitError):
+    if isinstance(exc, (FloodWaitError, AccountCooldownError)):
         return ErrorKind.FLOOD_WAIT
     if isinstance(exc, ChannelPrivateError):
         return ErrorKind.PRIVATE
