@@ -200,6 +200,9 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json()["ok"])
         self.assertEqual(client.get("/api/dashboard").status_code, 200)
+        grid = client.get("/api/results/grid?limit=5")
+        self.assertEqual(grid.status_code, 200)
+        self.assertIn("columns", grid.get_json())
 
 
 if __name__ == "__main__":
