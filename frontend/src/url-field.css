@@ -1,0 +1,29 @@
+.url-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.url-field textarea {
+  width: 100%;
+  min-height: 92px;
+  padding: 11px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: 0;
+  color: white;
+  background: #080e18;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.url-field textarea:focus {
+  border-color: var(--mint);
+}
+
+.url-field small {
+  color: #64748b;
+}

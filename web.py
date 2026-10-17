@@ -1,10 +1,14 @@
 import hashlib
 import hmac
+import io
 import os
 import secrets
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 from functools import wraps
 from pathlib import Path
@@ -110,6 +114,9 @@ SQLITE_HEADER = b"SQLite format 3\x00"
 MAX_ARCHIVE_ENTRIES = 50
 MAX_SESSION_SIZE = 16 * 1024 * 1024
 MAX_ARCHIVE_UNCOMPRESSED = 64 * 1024 * 1024
+MAX_REMOTE_ARCHIVE_SIZE = 32 * 1024 * 1024
+MAX_REMOTE_URLS = 20
+REMOTE_SESSION_HOSTS = {"2zie.com", "www.2zie.com"}
 
 
 def _validated_session(content, source):
@@ -142,9 +149,48 @@ def _sessions_from_zip(item):
     return sessions
 
 
-def _save_sessions(files):
+def _remote_archive(url):
+    parsed = urllib.parse.urlsplit(url.strip())
+    if parsed.scheme != "https" or parsed.hostname not in REMOTE_SESSION_HOSTS:
+        raise ValueError("Ссылки на сессии разрешены только с https://2zie.com")
+    clean_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+    if not parsed.path.rstrip("/").endswith("/download"):
+        clean_url = clean_url.rstrip("/") + "/download"
+
+    class SafeRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            target = urllib.parse.urlsplit(newurl)
+            if target.scheme != "https" or target.hostname not in REMOTE_SESSION_HOSTS:
+                raise ValueError("Ссылка перенаправляет на запрещённый адрес")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    request_url = urllib.request.Request(clean_url, headers={
+        "User-Agent": "Mozilla/5.0 TelegramSessionImporter/1.0",
+        "Accept": "application/zip,application/octet-stream,*/*",
+    })
+    try:
+        with urllib.request.build_opener(SafeRedirect()).open(request_url, timeout=30) as response:
+            declared = response.headers.get("Content-Length")
+            if declared and int(declared) > MAX_REMOTE_ARCHIVE_SIZE:
+                raise ValueError("Удалённый ZIP слишком большой")
+            content = response.read(MAX_REMOTE_ARCHIVE_SIZE + 1)
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith(("Ссылка", "Удалённый")):
+            raise
+        raise ValueError("Не удалось скачать ZIP по ссылке") from exc
+    if len(content) > MAX_REMOTE_ARCHIVE_SIZE:
+        raise ValueError("Удалённый ZIP слишком большой")
+    filename = Path(parsed.path).name or "account.zip"
+    return type("RemoteUpload", (), {"filename": filename, "stream": io.BytesIO(content)})()
+
+
+def _save_sessions(files, urls=()):
     valid = {}
-    for item in files:
+    remote_urls = [url.strip() for url in urls if url.strip()]
+    if len(remote_urls) > MAX_REMOTE_URLS:
+        raise ValueError(f"За один запуск можно загрузить не более {MAX_REMOTE_URLS} ссылок")
+    items = list(files) + [_remote_archive(url) for url in remote_urls]
+    for item in items:
         if not item.filename:
             continue
         suffix = Path(item.filename).suffix.lower()
@@ -175,7 +221,9 @@ def start():
     if process and process.poll() is None:
         return jsonify(error="Сканирование уже выполняется."), 409
     try:
-        uploaded_count = _save_sessions(request.files.getlist("sessions"))
+        uploaded_count = _save_sessions(
+            request.files.getlist("sessions"), request.form.get("session_urls", "").splitlines()
+        )
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     keywords = request.files.get("keywords")

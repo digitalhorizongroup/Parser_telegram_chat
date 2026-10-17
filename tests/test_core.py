@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import io
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 import openpyxl
@@ -66,6 +67,27 @@ class SessionTests(unittest.TestCase):
 
 
 class WebTests(unittest.TestCase):
+    def test_remote_import_rejects_non_allowlisted_hosts(self):
+        import web
+        with self.assertRaisesRegex(ValueError, "2zie.com"):
+            web._remote_archive("https://127.0.0.1/private.zip")
+
+    def test_remote_import_adds_download_path(self):
+        import web
+        archive_data = io.BytesIO()
+        with zipfile.ZipFile(archive_data, "w") as archive:
+            archive.writestr("account.session", b"SQLite format 3\x00" + b"x" * 64)
+        response = type("Response", (), {
+            "headers": {"Content-Length": str(len(archive_data.getvalue()))},
+            "read": lambda self, size: archive_data.getvalue(),
+            "__enter__": lambda self: self,
+            "__exit__": lambda self, *args: None,
+        })()
+        opener = type("Opener", (), {"open": lambda self, req, timeout: response})()
+        with patch("web.urllib.request.build_opener", return_value=opener):
+            item = web._remote_archive("https://2zie.com/file/example/account.zip")
+        self.assertEqual(len(web._sessions_from_zip(item)), 1)
+
     def test_zip_session_import_and_deduplication(self):
         import web
         payload = io.BytesIO()
