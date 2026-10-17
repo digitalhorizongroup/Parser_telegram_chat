@@ -3,8 +3,10 @@ import hmac
 import io
 import os
 import secrets
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -186,11 +188,52 @@ MAX_REMOTE_URLS = 20
 REMOTE_SESSION_HOSTS = {"2zie.com", "www.2zie.com"}
 
 
+def _normalize_session(content, source):
+    """Upgrade compact four-column SQLite sessions to Telethon's schema."""
+    with tempfile.TemporaryDirectory() as directory:
+        temporary = Path(directory) / "account.session"
+        temporary.write_bytes(content)
+        try:
+            connection = sqlite3.connect(temporary)
+            tables = {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            if "version" in tables:
+                if connection.execute("SELECT version FROM version").fetchone() is None:
+                    raise ValueError(f"{source}: пустая таблица версии сессии")
+            elif "sessions" in tables:
+                columns = [row[1] for row in connection.execute("PRAGMA table_info(sessions)")]
+                if columns != ["dc_id", "server_address", "port", "auth_key"]:
+                    raise ValueError(f"{source}: неизвестный формат SQLite-сессии")
+                row = connection.execute("SELECT dc_id,server_address,port,auth_key FROM sessions").fetchone()
+                if not row or not row[3] or len(row[3]) != 256:
+                    raise ValueError(f"{source}: сессия не содержит корректный ключ авторизации")
+                connection.executescript("""
+                    ALTER TABLE sessions ADD COLUMN takeout_id INTEGER;
+                    CREATE TABLE version (version INTEGER PRIMARY KEY);
+                    INSERT INTO version VALUES (7);
+                    CREATE TABLE entities (id INTEGER PRIMARY KEY, hash INTEGER NOT NULL,
+                        username TEXT, phone INTEGER, name TEXT, date INTEGER);
+                    CREATE TABLE sent_files (md5_digest BLOB, file_size INTEGER, type INTEGER,
+                        id INTEGER, hash INTEGER, PRIMARY KEY(md5_digest, file_size, type));
+                    CREATE TABLE update_state (id INTEGER PRIMARY KEY, pts INTEGER, qts INTEGER,
+                        date INTEGER, seq INTEGER);
+                """)
+                connection.commit()
+            else:
+                raise ValueError(f"{source}: в SQLite нет таблицы sessions")
+            connection.close()
+        except sqlite3.DatabaseError as exc:
+            raise ValueError(f"{source}: повреждённая SQLite-сессия") from exc
+        return temporary.read_bytes()
+
+
 def _validated_session(content, source):
     if len(content) > MAX_SESSION_SIZE:
         raise ValueError(f"{source}: файл сессии слишком большой")
     if not content.startswith(SQLITE_HEADER):
         raise ValueError(f"{source}: это не Telethon/SQLite .session")
+    content = _normalize_session(content, source)
     return hashlib.sha256(content).hexdigest()[:24], content
 
 

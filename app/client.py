@@ -1,9 +1,12 @@
 from pathlib import Path
+import logging
 
 from app.config import (API_HASH, API_ID, APP_VERSION, DEVICE_MODEL, LANG_CODE,
                         LANG_PACK, SESSION_NAME, SESSIONS_DIR, SYSTEM_LANG_CODE,
                         SYSTEM_VERSION)
 from telethon import TelegramClient
+
+logger = logging.getLogger(__name__)
 
 def create_client(session: Path | str = SESSION_NAME) -> TelegramClient:
     client = TelegramClient(
@@ -32,5 +35,11 @@ def discover_sessions() -> list[Path]:
 def create_clients() -> tuple[list[TelegramClient], bool]:
     sessions = discover_sessions()
     if sessions:
-        return [create_client(path) for path in sessions], True
+        clients = []
+        for path in sessions:
+            try:
+                clients.append(create_client(path))
+            except Exception as exc:
+                logger.error("Сессия %s имеет неподдерживаемый формат: %s", path.name, exc)
+        return clients, True
     return [create_client()], False

@@ -1,17 +1,31 @@
 import tempfile
 import unittest
 import io
+import sqlite3
+import hashlib
 import zipfile
 from unittest.mock import patch
 from pathlib import Path
 
 import openpyxl
+from telethon.sessions import SQLiteSession
 
 import app.client as client_module
 from app.analytics import detect_language
 from app.database import Database
 from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, ScanError
+
+
+def compact_session_bytes():
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "compact.session"
+        connection = sqlite3.connect(path)
+        connection.execute("CREATE TABLE sessions (dc_id INTEGER NOT NULL, server_address TEXT NOT NULL, port INTEGER NOT NULL, auth_key BLOB NOT NULL)")
+        connection.execute("INSERT INTO sessions VALUES (2, '149.154.167.40', 443, ?)", (b"x" * 256,))
+        connection.commit()
+        connection.close()
+        return path.read_bytes()
 
 
 class DatabaseTests(unittest.TestCase):
@@ -67,6 +81,18 @@ class SessionTests(unittest.TestCase):
 
 
 class WebTests(unittest.TestCase):
+    def test_compact_session_is_upgraded_for_telethon(self):
+        import web
+        content = compact_session_bytes()
+        digest, upgraded = web._validated_session(content, "compact.session")
+        self.assertEqual(digest, hashlib.sha256(upgraded).hexdigest()[:24])
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "upgraded.session"
+            target.write_bytes(upgraded)
+            session = SQLiteSession(str(target))
+            self.assertEqual(session.dc_id, 2)
+            session.close()
+
     def test_remote_import_rejects_non_allowlisted_hosts(self):
         import web
         with self.assertRaisesRegex(ValueError, "2zie.com"):
@@ -76,7 +102,7 @@ class WebTests(unittest.TestCase):
         import web
         archive_data = io.BytesIO()
         with zipfile.ZipFile(archive_data, "w") as archive:
-            archive.writestr("account.session", b"SQLite format 3\x00" + b"x" * 64)
+            archive.writestr("account.session", compact_session_bytes())
         response = type("Response", (), {
             "headers": {"Content-Length": str(len(archive_data.getvalue()))},
             "read": lambda self, size: archive_data.getvalue(),
@@ -93,7 +119,7 @@ class WebTests(unittest.TestCase):
         payload = io.BytesIO()
         with zipfile.ZipFile(payload, "w") as archive:
             archive.writestr("account.json", "{}")
-            archive.writestr("nested/account.session", b"SQLite format 3\x00" + b"x" * 64)
+            archive.writestr("nested/account.session", compact_session_bytes())
         payload.seek(0)
         with tempfile.TemporaryDirectory() as directory:
             original = web.SESSIONS_DIR
