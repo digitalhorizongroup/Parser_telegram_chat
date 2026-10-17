@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import io
@@ -7,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -17,8 +19,9 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory, session
+from telethon.errors import FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
-from app.client import discover_sessions
+from app.client import create_client, discover_sessions
 from app.config import DATABASE_FILE, DICTIONARY, EXCEL_FILE, SESSIONS_DIR
 from app.database import Database
 from app.progress import read_progress
@@ -34,6 +37,8 @@ WEB_PASSWORD = os.getenv("WEB_PASSWORD", "change-me")
 process = None
 process_state = {}
 login_attempts = {}
+pending_logins = {}
+pending_lock = threading.Lock()
 LOGS_DIR = DATABASE_FILE.parent / "logs"
 
 
@@ -136,6 +141,95 @@ def accounts():
                "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()}
               for path in discover_sessions()]
     return jsonify(accounts=values)
+
+
+def _login_error(exc):
+    if isinstance(exc, FloodWaitError):
+        return f"Telegram просит подождать {exc.seconds} сек.", 429
+    if isinstance(exc, PhoneCodeInvalidError):
+        return "Неверный код Telegram.", 400
+    if isinstance(exc, PhoneCodeExpiredError):
+        return "Код Telegram истёк. Запросите новый.", 400
+    return f"Ошибка Telegram: {type(exc).__name__}", 400
+
+
+def _close_client(client):
+    try:
+        asyncio.run(client.disconnect())
+    except Exception:
+        pass
+    try:
+        client.session.close()
+    except Exception:
+        pass
+
+
+@app.post("/api/accounts/send-code")
+@api_login_required
+def account_send_code():
+    require_csrf()
+    payload = request.get_json(silent=True) or {}
+    phone = "".join(ch for ch in str(payload.get("phone", "")) if ch.isdigit() or ch == "+")
+    if not phone.startswith("+") or not 8 <= len(phone) <= 16:
+        return jsonify(error="Введите номер в международном формате, например +380…"), 400
+    token = secrets.token_urlsafe(24)
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    path = SESSIONS_DIR / f"pending_{token}.session"
+    client = create_client(path)
+    async def send():
+        await asyncio.wait_for(client.connect(), timeout=25)
+        return await asyncio.wait_for(client.send_code_request(phone), timeout=30)
+    try:
+        sent = asyncio.run(send())
+        client.session.close()
+    except Exception as exc:
+        _close_client(client)
+        path.unlink(missing_ok=True)
+        message, status = _login_error(exc)
+        return jsonify(error=message), status
+    with pending_lock:
+        pending_logins[token] = {"phone": phone, "phone_code_hash": sent.phone_code_hash,
+                                 "path": str(path), "created": time.time()}
+    return jsonify(ok=True, token=token, message="Код отправлен в Telegram.")
+
+
+@app.post("/api/accounts/confirm")
+@api_login_required
+def account_confirm():
+    require_csrf()
+    payload = request.get_json(silent=True) or {}
+    token, code, password = str(payload.get("token", "")), str(payload.get("code", "")).strip(), str(payload.get("password", ""))
+    with pending_lock:
+        state = pending_logins.get(token)
+    if not state or time.time() - state["created"] > 600:
+        return jsonify(error="Сессия авторизации истекла. Запросите код заново."), 400
+    client = create_client(Path(state["path"]))
+    async def confirm():
+        await asyncio.wait_for(client.connect(), timeout=25)
+        try:
+            await asyncio.wait_for(client.sign_in(state["phone"], code, phone_code_hash=state["phone_code_hash"]), timeout=30)
+        except SessionPasswordNeededError:
+            if not password:
+                return None
+            await asyncio.wait_for(client.sign_in(password=password), timeout=30)
+        return await asyncio.wait_for(client.get_me(), timeout=20)
+    try:
+        me = asyncio.run(confirm())
+        if me is None:
+            _close_client(client)
+            return jsonify(ok=True, requires_password=True, message="Введите пароль двухэтапной аутентификации.")
+        _close_client(client)
+        path = Path(state["path"])
+        content = path.read_bytes()
+        destination = SESSIONS_DIR / f"session_{hashlib.sha256(content).hexdigest()[:24]}.session"
+        path.replace(destination)
+        with pending_lock:
+            pending_logins.pop(token, None)
+        return jsonify(ok=True, authorized=True, account={"id": me.id, "name": " ".join(x for x in [me.first_name, me.last_name] if x)})
+    except Exception as exc:
+        _close_client(client)
+        message, status = _login_error(exc)
+        return jsonify(error=message), status
 
 
 @app.delete("/api/accounts/<name>")

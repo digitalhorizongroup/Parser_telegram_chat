@@ -29,7 +29,8 @@ def discover_sessions() -> list[Path]:
     """Return uploaded Telethon sessions; names are intentionally irrelevant."""
     if not SESSIONS_DIR.exists():
         return []
-    return sorted(path for path in SESSIONS_DIR.iterdir() if path.is_file() and path.suffix.lower() == ".session")
+    return sorted(path for path in SESSIONS_DIR.iterdir()
+                  if path.is_file() and path.suffix.lower() == ".session" and not path.name.startswith("pending_"))
 
 
 def create_clients() -> tuple[list[TelegramClient], bool]:
