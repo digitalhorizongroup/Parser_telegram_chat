@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import io
+import zipfile
 from pathlib import Path
 
 import openpyxl
@@ -64,6 +66,25 @@ class SessionTests(unittest.TestCase):
 
 
 class WebTests(unittest.TestCase):
+    def test_zip_session_import_and_deduplication(self):
+        import web
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as archive:
+            archive.writestr("account.json", "{}")
+            archive.writestr("nested/account.session", b"SQLite format 3\x00" + b"x" * 64)
+        payload.seek(0)
+        with tempfile.TemporaryDirectory() as directory:
+            original = web.SESSIONS_DIR
+            try:
+                web.SESSIONS_DIR = Path(directory)
+                files = [type("Upload", (), {"filename": "account.zip", "stream": payload})()]
+                self.assertEqual(web._save_sessions(files), 1)
+                payload.seek(0)
+                self.assertEqual(web._save_sessions(files), 0)
+                self.assertEqual(len(list(Path(directory).glob("*.session"))), 1)
+            finally:
+                web.SESSIONS_DIR = original
+
     def test_authentication_and_dashboard(self):
         import web
         client = web.app.test_client()

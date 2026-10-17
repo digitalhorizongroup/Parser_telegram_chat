@@ -5,6 +5,7 @@ import secrets
 import subprocess
 import sys
 import time
+import zipfile
 from functools import wraps
 from pathlib import Path
 
@@ -105,22 +106,65 @@ def dashboard():
     return jsonify(value)
 
 
+SQLITE_HEADER = b"SQLite format 3\x00"
+MAX_ARCHIVE_ENTRIES = 50
+MAX_SESSION_SIZE = 16 * 1024 * 1024
+MAX_ARCHIVE_UNCOMPRESSED = 64 * 1024 * 1024
+
+
+def _validated_session(content, source):
+    if len(content) > MAX_SESSION_SIZE:
+        raise ValueError(f"{source}: файл сессии слишком большой")
+    if not content.startswith(SQLITE_HEADER):
+        raise ValueError(f"{source}: это не Telethon/SQLite .session")
+    return hashlib.sha256(content).hexdigest()[:24], content
+
+
+def _sessions_from_zip(item):
+    try:
+        with zipfile.ZipFile(item.stream) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_ARCHIVE_ENTRIES:
+                raise ValueError(f"{item.filename}: слишком много файлов в архиве")
+            if sum(entry.file_size for entry in entries) > MAX_ARCHIVE_UNCOMPRESSED:
+                raise ValueError(f"{item.filename}: архив слишком большой после распаковки")
+            sessions = []
+            for entry in entries:
+                if entry.is_dir() or Path(entry.filename).suffix.lower() != ".session":
+                    continue
+                if entry.file_size > MAX_SESSION_SIZE:
+                    raise ValueError(f"{item.filename}: файл сессии слишком большой")
+                sessions.append(_validated_session(archive.read(entry), f"{item.filename}/{entry.filename}"))
+    except (zipfile.BadZipFile, RuntimeError) as exc:
+        raise ValueError(f"{item.filename}: повреждённый или защищённый ZIP-архив") from exc
+    if not sessions:
+        raise ValueError(f"{item.filename}: внутри нет файла .session")
+    return sessions
+
+
 def _save_sessions(files):
-    valid = []
+    valid = {}
     for item in files:
         if not item.filename:
             continue
-        header = item.stream.read(16)
-        item.stream.seek(0)
-        if header != b"SQLite format 3\x00":
-            raise ValueError(f"{item.filename}: это не Telethon/SQLite .session")
-        content = item.stream.read()
-        item.stream.seek(0)
-        valid.append((item, hashlib.sha256(content).hexdigest()[:24]))
+        suffix = Path(item.filename).suffix.lower()
+        if suffix == ".zip":
+            for digest, content in _sessions_from_zip(item):
+                valid[digest] = content
+        elif suffix == ".session":
+            content = item.stream.read(MAX_SESSION_SIZE + 1)
+            digest, content = _validated_session(content, item.filename)
+            valid[digest] = content
+        else:
+            raise ValueError(f"{item.filename}: поддерживаются только .session и .zip")
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    for item, digest in valid:
-        item.save(SESSIONS_DIR / f"session_{digest}.session")
-    return len(valid)
+    added = 0
+    for digest, content in valid.items():
+        destination = SESSIONS_DIR / f"session_{digest}.session"
+        if not destination.exists():
+            destination.write_bytes(content)
+            added += 1
+    return added
 
 
 @app.post("/api/start")
@@ -141,7 +185,7 @@ def start():
         DICTIONARY.parent.mkdir(parents=True, exist_ok=True)
         keywords.save(DICTIONARY)
     if not discover_sessions():
-        return jsonify(error="Загрузите хотя бы одну авторизованную .session."), 400
+        return jsonify(error="Загрузите хотя бы одну авторизованную .session или ZIP с сессией."), 400
     cmd = [sys.executable, str(BASE_DIR / "run.py"), "--min-users", request.form.get("min_users", "1"),
            "--min-messages", request.form.get("min_messages", "0"), "--exclude", request.form.get("exclude", "")]
     language = request.form.get("language", "")
