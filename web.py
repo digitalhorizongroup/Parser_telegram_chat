@@ -198,9 +198,9 @@ def _normalize_session(content, source):
             tables = {row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
-            if "version" in tables:
-                if connection.execute("SELECT version FROM version").fetchone() is None:
-                    raise ValueError(f"{source}: пустая таблица версии сессии")
+            version = connection.execute("SELECT version FROM version").fetchone() if "version" in tables else None
+            if version:
+                pass
             elif "sessions" in tables:
                 columns = [row[1] for row in connection.execute("PRAGMA table_info(sessions)")]
                 if columns != ["dc_id", "server_address", "port", "auth_key"]:
@@ -210,13 +210,13 @@ def _normalize_session(content, source):
                     raise ValueError(f"{source}: сессия не содержит корректный ключ авторизации")
                 connection.executescript("""
                     ALTER TABLE sessions ADD COLUMN takeout_id INTEGER;
-                    CREATE TABLE version (version INTEGER PRIMARY KEY);
-                    INSERT INTO version VALUES (7);
-                    CREATE TABLE entities (id INTEGER PRIMARY KEY, hash INTEGER NOT NULL,
+                    CREATE TABLE IF NOT EXISTS version (version INTEGER PRIMARY KEY);
+                    INSERT OR REPLACE INTO version VALUES (7);
+                    CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, hash INTEGER NOT NULL,
                         username TEXT, phone INTEGER, name TEXT, date INTEGER);
-                    CREATE TABLE sent_files (md5_digest BLOB, file_size INTEGER, type INTEGER,
+                    CREATE TABLE IF NOT EXISTS sent_files (md5_digest BLOB, file_size INTEGER, type INTEGER,
                         id INTEGER, hash INTEGER, PRIMARY KEY(md5_digest, file_size, type));
-                    CREATE TABLE update_state (id INTEGER PRIMARY KEY, pts INTEGER, qts INTEGER,
+                    CREATE TABLE IF NOT EXISTS update_state (id INTEGER PRIMARY KEY, pts INTEGER, qts INTEGER,
                         date INTEGER, seq INTEGER);
                 """)
                 connection.commit()
