@@ -21,6 +21,7 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 from app.client import discover_sessions
 from app.config import DATABASE_FILE, DICTIONARY, EXCEL_FILE, SESSIONS_DIR
 from app.database import Database
+from app.progress import read_progress
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
@@ -113,7 +114,7 @@ def dashboard():
                  report=EXCEL_FILE.exists(), database=DATABASE_FILE.exists(),
                  keywords=DICTIONARY.stat().st_size if DICTIONARY.exists() else 0,
                  insecure_defaults=WEB_PASSWORD == "change-me", exit_code=exit_code,
-                 process=process_state)
+                 process=process_state, live=read_progress())
     return jsonify(value)
 
 
@@ -344,7 +345,7 @@ def start():
         keywords.save(DICTIONARY)
     if not discover_sessions():
         return jsonify(error="Загрузите хотя бы одну авторизованную .session или ZIP с сессией."), 400
-    cmd = [sys.executable, str(BASE_DIR / "run.py"), "--min-users", request.form.get("min_users", "1"),
+    cmd = [sys.executable, "-u", str(BASE_DIR / "run.py"), "--min-users", request.form.get("min_users", "1"),
            "--min-messages", request.form.get("min_messages", "0"), "--exclude", request.form.get("exclude", "")]
     language = request.form.get("language", "")
     if language in {"ru", "uk", "en"}:

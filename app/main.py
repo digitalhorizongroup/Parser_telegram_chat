@@ -12,6 +12,7 @@ from app.database import Database
 from app.errors import classify_error
 from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, FilterConfig, ScanError
+from app.progress import update_progress
 from app.rate_limit import TelegramLimiter
 from app.search import search_groups
 from app.utils import load_keywords
@@ -56,6 +57,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
     run_id, resumed = db.start_or_resume(_fingerprint(filters))
     clients, uploaded_sessions = create_clients()
     logger.info("Запуск #%s%s", run_id, " (возобновлён)" if resumed else "")
+    update_progress(run_id=run_id, phase="connecting", phase_label="Подключение аккаунтов", completed=0, total=0, current="")
 
     active_clients = []
     try:
@@ -75,13 +77,18 @@ async def check_voice_chats(filters: FilterConfig | None = None):
 
         limiters = [TelegramLimiter(1, REQUEST_DELAY, REQUEST_RETRIES) for _ in active_clients]
         logger.info("Активных сессий: %s", len(active_clients))
+        update_progress(phase="searching", phase_label="Поиск сообществ", active_sessions=len(active_clients), current="Telegram search")
         groups = await search_groups(active_clients[0], limiters[0])
         db.set_total(run_id, len(groups))
         processed = db.processed_ids(run_id)
+        completed_count = len(processed)
+        update_progress(phase="processing", phase_label="Анализ сообществ", total=len(groups), completed=completed_count, remaining=max(0, len(groups)-completed_count))
 
         async def process(chat, client, limiter):
+            nonlocal completed_count
             if chat.id in processed:
                 return
+            update_progress(current=chat.title)
             try:
                 entity = chat
                 if client is not active_clients[0] and chat.username:
@@ -118,6 +125,9 @@ async def check_voice_chats(filters: FilterConfig | None = None):
                 kind = classify_error(exc)
                 db.save_error(run_id, ScanError(chat.id, chat.title, kind, str(exc)))
                 logger.exception("Ошибка: %s", chat.title)
+            finally:
+                completed_count += 1
+                update_progress(completed=completed_count, remaining=max(0, len(groups)-completed_count), current=chat.title)
 
         pending = [chat for chat in groups if chat.id not in processed]
         public_index = 0
@@ -128,10 +138,12 @@ async def check_voice_chats(filters: FilterConfig | None = None):
             tasks.append(process(chat, active_clients[worker_index], limiters[worker_index]))
         await asyncio.gather(*tasks)
 
+        update_progress(phase="exporting", phase_label="Формирование Excel", current="")
         results, errors = db.results(run_id), db.errors(run_id)
         save_to_excel(results, errors=errors, run_id=run_id)
         db.finish(run_id)
         logger.info("Завершено: %s результа(ов), %s ошибка(ок)", len(results), len(errors))
+        update_progress(phase="completed", phase_label="Завершено", completed=len(groups), total=len(groups), remaining=0, current="")
     finally:
         await asyncio.gather(*(item.disconnect() for item in active_clients), return_exceptions=True)
         db.close()

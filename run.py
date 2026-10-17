@@ -1,6 +1,7 @@
 import asyncio
 import argparse
 import logging
+from app.progress import update_progress
 
 from app.config import validate_config
 
@@ -28,4 +29,5 @@ if __name__ == "__main__":
     except (RuntimeError, ValueError) as exc:
         logging.basicConfig(level=logging.ERROR, format="%(levelname)s: %(message)s")
         logging.error("%s", exc)
+        update_progress(phase="failed", phase_label="Ошибка запуска", error=str(exc))
         raise SystemExit(2)
