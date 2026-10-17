@@ -39,6 +39,9 @@ REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "0.35"))
 EXCEL_FILE = Path(os.getenv("OUTPUT_FILE", str(ASSETS_DIR / "groups.xlsx")))
 DICTIONARY = Path(os.getenv("KEYWORDS_FILE", str(ASSETS_DIR / "keywords.txt")))
 DATABASE_FILE = Path(os.getenv("DATABASE_FILE", str(ASSETS_DIR / "history.sqlite3")))
+COOLDOWN_FILE = Path(os.getenv("TELEGRAM_COOLDOWN_FILE", str(ASSETS_DIR / "account_cooldowns.json")))
+LONG_FLOODWAIT_THRESHOLD = _env_int("LONG_FLOODWAIT_THRESHOLD", 3600)
+LONG_ACCOUNT_REST_SECONDS = _env_int("LONG_ACCOUNT_REST_SECONDS", 172800)
 
 
 def validate_config() -> None:

@@ -15,6 +15,7 @@ from app.analytics import detect_language
 from app.database import Database
 from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, ScanError, SearchCandidate
+from app.rate_limit import CooldownStore
 
 
 def compact_session_bytes():
@@ -130,6 +131,15 @@ class SessionTests(unittest.TestCase):
                 self.assertEqual(len(client_module.discover_sessions()), 2)
             finally:
                 client_module.SESSIONS_DIR = original
+
+
+class CooldownTests(unittest.TestCase):
+    def test_account_cooldown_survives_new_store_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cooldowns.json"
+            remaining = CooldownStore(path).block("session-a", 172800)
+            self.assertGreaterEqual(remaining, 172799)
+            self.assertGreaterEqual(CooldownStore(path).remaining("session-a"), 172799)
 
 
 class WebTests(unittest.TestCase):

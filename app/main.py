@@ -7,13 +7,14 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 
 from app.analytics import collect_analytics
 from app.client import create_clients
-from app.config import DATABASE_FILE, REQUEST_DELAY, REQUEST_RETRIES
+from app.config import (COOLDOWN_FILE, DATABASE_FILE, LONG_ACCOUNT_REST_SECONDS,
+                        LONG_FLOODWAIT_THRESHOLD, REQUEST_DELAY, REQUEST_RETRIES)
 from app.database import Database
 from app.errors import classify_error
 from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, FilterConfig, ScanError
 from app.progress import update_progress
-from app.rate_limit import AccountCooldownError, TelegramLimiter
+from app.rate_limit import AccountCooldownError, CooldownStore, TelegramLimiter
 from app.search import search_groups
 from app.utils import load_keywords
 
@@ -56,6 +57,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
     db = Database(DATABASE_FILE)
     run_id, resumed = db.start_or_resume(_fingerprint(filters))
     clients, uploaded_sessions = create_clients()
+    cooldown_store = CooldownStore(COOLDOWN_FILE)
     logger.info("Запуск #%s%s", run_id, " (возобновлён)" if resumed else "")
     update_progress(
         run_id=run_id, phase="connecting", phase_label="Подключение аккаунтов",
@@ -68,6 +70,10 @@ async def check_voice_chats(filters: FilterConfig | None = None):
             name = getattr(client.session, "filename", f"account-{index}")
             logger.info("Проверка аккаунта %s/%s: %s", index, len(clients), name)
             update_progress(current=f"Проверка аккаунта {index} из {len(clients)}")
+            remaining = cooldown_store.remaining(str(name))
+            if remaining:
+                logger.warning("Аккаунт %s отдыхает ещё %s сек. и пропущен", index, remaining)
+                return None
             try:
                 if uploaded_sessions:
                     await asyncio.wait_for(client.connect(), timeout=20)
@@ -95,7 +101,11 @@ async def check_voice_chats(filters: FilterConfig | None = None):
         if not active_clients:
             raise RuntimeError("Нет ни одной авторизованной Telegram-сессии")
 
-        limiters = [TelegramLimiter(1, REQUEST_DELAY, REQUEST_RETRIES) for _ in active_clients]
+        limiters = [TelegramLimiter(
+            1, REQUEST_DELAY, REQUEST_RETRIES, cooldown_store,
+            str(getattr(client.session, "filename", f"account-{index + 1}")),
+            LONG_FLOODWAIT_THRESHOLD, LONG_ACCOUNT_REST_SECONDS,
+        ) for index, client in enumerate(active_clients)]
         logger.info("Активных сессий: %s", len(active_clients))
         keyword_count = len(load_keywords())
         update_progress(
