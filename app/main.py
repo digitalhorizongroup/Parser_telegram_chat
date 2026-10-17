@@ -61,16 +61,33 @@ async def check_voice_chats(filters: FilterConfig | None = None):
 
     active_clients = []
     try:
-        for client in clients:
-            if uploaded_sessions:
-                await client.connect()
-                if not await client.is_user_authorized():
-                    logger.error("Сессия %s не авторизована и пропущена", client.session.filename)
-                    await client.disconnect()
-                    continue
-            else:
-                await client.start()
-            active_clients.append(client)
+        async def prepare_client(index, client):
+            name = getattr(client.session, "filename", f"account-{index}")
+            logger.info("Проверка аккаунта %s/%s: %s", index, len(clients), name)
+            update_progress(current=f"Проверка аккаунта {index} из {len(clients)}")
+            try:
+                if uploaded_sessions:
+                    await asyncio.wait_for(client.connect(), timeout=20)
+                    if not await asyncio.wait_for(client.is_user_authorized(), timeout=15):
+                        logger.error("Сессия %s не авторизована и пропущена", name)
+                        await asyncio.wait_for(client.disconnect(), timeout=5)
+                        return None
+                else:
+                    await asyncio.wait_for(client.start(), timeout=60)
+                logger.info("Аккаунт %s готов", index)
+                return client
+            except asyncio.TimeoutError:
+                logger.error("Таймаут подключения аккаунта %s; сессия пропущена", index)
+            except Exception as exc:
+                logger.error("Ошибка подключения аккаунта %s: %s", index, exc)
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=5)
+            except Exception:
+                pass
+            return None
+
+        prepared = await asyncio.gather(*(prepare_client(i, client) for i, client in enumerate(clients, 1)))
+        active_clients.extend(client for client in prepared if client is not None)
 
         if not active_clients:
             raise RuntimeError("Нет ни одной авторизованной Telegram-сессии")
