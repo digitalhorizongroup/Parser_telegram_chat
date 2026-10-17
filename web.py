@@ -169,9 +169,10 @@ def _close_client(client):
 def account_send_code():
     require_csrf()
     payload = request.get_json(silent=True) or {}
-    phone = "".join(ch for ch in str(payload.get("phone", "")) if ch.isdigit() or ch == "+")
-    if not phone.startswith("+") or not 8 <= len(phone) <= 16:
-        return jsonify(error="Введите номер в международном формате, например +380…"), 400
+    digits = "".join(ch for ch in str(payload.get("phone", "")) if ch.isdigit())
+    phone = "+" + digits
+    if not 8 <= len(digits) <= 15:
+        return jsonify(error="Введите номер с кодом страны, например 380…"), 400
     token = secrets.token_urlsafe(24)
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     path = SESSIONS_DIR / f"pending_{token}.session"
