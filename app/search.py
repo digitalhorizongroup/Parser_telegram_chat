@@ -12,6 +12,7 @@ async def search_groups(clients, limiters):
     keywords = load_keywords()
 
     for index, keyword in enumerate(keywords):
+        keyword_finished = False
         update_progress(
             phase="searching",
             phase_label="Поиск сообществ",
@@ -26,6 +27,7 @@ async def search_groups(clients, limiters):
         try:
             result = None
             last_error = None
+            cooldowns = []
             for shift in range(len(clients)):
                 worker = (index + shift) % len(clients)
                 try:
@@ -33,10 +35,12 @@ async def search_groups(clients, limiters):
                     break
                 except Exception as exc:
                     last_error = exc
+                    if isinstance(exc, AccountCooldownError):
+                        cooldowns.append(exc.seconds)
                     logger.warning("Аккаунт %s не выполнил поиск, пробуем следующий: %s", worker + 1, exc)
             if result is None:
-                if last_error and isinstance(last_error, AccountCooldownError):
-                    raise last_error
+                if len(cooldowns) == len(clients):
+                    raise AccountCooldownError(min(cooldowns))
                 raise last_error or RuntimeError("Нет доступных аккаунтов")
             for chat in result.chats:
                 if (
@@ -46,16 +50,18 @@ async def search_groups(clients, limiters):
                 ):
                     found_groups[chat.id] = chat
                     logger.info(f"✅ Найдено: {chat.title} (@{chat.username if chat.username else 'Приватный'})")
+            keyword_finished = True
         except AccountCooldownError:
             raise
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске {keyword}: {e}")
+            keyword_finished = True
         finally:
             update_progress(
-                completed=index + 1,
+                completed=index + int(keyword_finished),
                 total=len(keywords),
-                remaining=len(keywords) - index - 1,
-                current=f"Завершено: {keyword}",
+                remaining=len(keywords) - index - int(keyword_finished),
+                current=(f"Завершено: {keyword}" if keyword_finished else f"Ожидает: {keyword}"),
                 found=len(found_groups),
             )
     return list(found_groups.values())
