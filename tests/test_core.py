@@ -82,6 +82,22 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(table["rows"][0]["status"], "processed")
             reopened.close()
 
+    def test_grid_uses_server_filter_sort_group_and_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "test.sqlite3")
+            run_id, _ = db.start_or_resume("grid")
+            db.save_result(run_id, ChatResult(1, "Alpha", "same", "channel", 100, messages_24h=10, score=4))
+            db.save_result(run_id, ChatResult(2, "Beta", "same", "chat", 200, messages_24h=20, score=8))
+            value = db.grid_data(
+                run_id, filters=[{"field": "participants", "op": "gte", "value": 100}],
+                sorts=[{"field": "score", "dir": "desc"}], group_by="chat_type", duplicate_field="username",
+            )
+            self.assertEqual([row["chat_id"] for row in value["rows"]], [2, 1])
+            self.assertEqual(value["summary"]["participants"]["sum"], 300)
+            self.assertEqual(sum(item["count"] for item in value["groups"]), 2)
+            self.assertEqual(value["duplicates"][0]["value"], "same")
+            db.close()
+
 
 class ExportTests(unittest.TestCase):
     def test_workbook_structure_and_links(self):

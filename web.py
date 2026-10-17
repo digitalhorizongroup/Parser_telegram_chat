@@ -20,6 +20,7 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory, session
+from openpyxl import Workbook
 from telethon.errors import FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
 from app.client import create_client, discover_sessions
@@ -149,26 +150,93 @@ def result_table():
     return jsonify(value)
 
 
+def _json_query(name, fallback):
+    try:
+        value = json.loads(request.args.get(name, ""))
+        return value if isinstance(value, list) else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+@app.get("/api/results/grid")
+@api_login_required
+def results_grid():
+    if not DATABASE_FILE.exists():
+        return jsonify(run_id=None, total=0, rows=[], columns=[], summary={}, groups=[], duplicates=[])
+    db = Database(DATABASE_FILE)
+    value = db.grid_data(
+        request.args.get("run_id", type=int), request.args.get("q", ""),
+        _json_query("filters", []), _json_query("sorts", []),
+        request.args.get("limit", 100, type=int), request.args.get("offset", 0, type=int),
+        request.args.get("group_by", ""), request.args.get("duplicates", ""),
+    )
+    value["runs"] = db.run_history(100)
+    db.close()
+    return jsonify(value)
+
+
+def _grid_export_rows(db):
+    run_id = request.args.get("run_id", type=int)
+    query, filters, sorts = request.args.get("q", ""), _json_query("filters", []), _json_query("sorts", [])
+    selected = {int(x) for x in request.args.get("ids", "").split(",") if x.strip().isdigit()}
+    first = db.grid_data(run_id, query, filters, sorts, 1000, 0)
+    rows = list(first["rows"])
+    for offset in range(1000, first["total"], 1000):
+        rows.extend(db.grid_data(first["run_id"], query, filters, sorts, 1000, offset)["rows"])
+    if selected:
+        rows = [row for row in rows if int(row.get("chat_id", 0)) in selected]
+    return first, rows
+
+
+def _safe_xlsx_value(value):
+    """Prevent imported Telegram text from becoming a spreadsheet formula."""
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 @app.get("/download/results.csv")
 @api_login_required
 def download_results_csv():
     if not DATABASE_FILE.exists():
         return "Результатов ещё нет", 404
     db = Database(DATABASE_FILE)
-    value = db.result_table(request.args.get("run_id", type=int), request.args.get("q", ""), 100000, 0)
+    value, rows = _grid_export_rows(db)
     db.close()
-    fields = ["status", "title", "username", "chat_type", "participants", "messages_24h", "messages_7d",
-              "messages_30d", "active_authors", "views", "reactions", "engagement_rate",
-              "audience_growth", "last_activity", "language", "score"]
+    fields = [column["key"] for column in value["columns"]]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
-    for row in value["rows"]:
+    for row in rows:
         safe = {key: ("'" + str(row.get(key, "")) if str(row.get(key, "")).startswith(("=", "+", "-", "@")) else row.get(key, "")) for key in fields}
         writer.writerow(safe)
     response = app.response_class("\ufeff" + output.getvalue(), mimetype="text/csv; charset=utf-8")
     response.headers["Content-Disposition"] = f"attachment; filename=results-run-{value['run_id'] or 0}.csv"
     return response
+
+
+@app.get("/download/results.xlsx")
+@api_login_required
+def download_results_xlsx():
+    if not DATABASE_FILE.exists():
+        return "Результатов ещё нет", 404
+    db = Database(DATABASE_FILE)
+    value, rows = _grid_export_rows(db)
+    db.close()
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet("Результаты")
+    fields = [column["key"] for column in value["columns"]]
+    sheet.append([column["label"] for column in value["columns"]])
+    for row in rows:
+        sheet.append([_safe_xlsx_value(row.get(field)) for field in fields])
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output, as_attachment=True,
+        download_name=f"results-run-{value['run_id'] or 0}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.get("/api/accounts")

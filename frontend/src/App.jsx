@@ -19,6 +19,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { api, setCsrf } from "./api";
+import ExcelView from "./ExcelView";
 import "./url-field.css";
 import "./management.css";
 import "./phone-auth.css";
@@ -804,7 +805,8 @@ function ResultsPage() {
     }),
     [query, setQuery] = useState(""),
     [runId, setRunId] = useState(""),
-    [updated, setUpdated] = useState(null);
+    [updated, setUpdated] = useState(null),
+    [view, setView] = useState(localStorage.getItem("results-view") || "normal");
   async function load(run = runId, q = query) {
     const params = new URLSearchParams({ limit: "1000" });
     if (run) params.set("run_id", run);
@@ -837,6 +839,11 @@ function ResultsPage() {
         <article><span>Ошибки</span><strong>{data.errors.length}</strong><small>недоступно или отфильтровано</small></article>
         <article><span>Обновление</span><strong>{updated ? updated.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><small>данные обновляются автоматически</small></article>
       </section>
+      <div className="view-switch" role="tablist" aria-label="Режим таблицы">
+        <button className={view === "normal" ? "active" : ""} onClick={() => { setView("normal"); localStorage.setItem("results-view", "normal"); }}>Обычный вид</button>
+        <button className={view === "excel" ? "active" : ""} onClick={() => { setView("excel"); localStorage.setItem("results-view", "excel"); }}>Excel-вид</button>
+      </div>
+      {view === "excel" ? <ExcelView runs={data.runs} initialRun={data.run_id} /> : <>
       <section className="result-tools">
         <select
           value={runId || data.run_id || ""}
@@ -928,6 +935,7 @@ function ResultsPage() {
           </tbody>
         </table>
       </section>
+      </>}
     </main>
   );
 }

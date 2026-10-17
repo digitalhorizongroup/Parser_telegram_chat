@@ -7,6 +7,20 @@ from app.models import ChatResult, ScanError, SearchCandidate
 
 
 class Database:
+    GRID_FIELDS = (
+        ("chat_id", "ID", "number"), ("status", "Статус", "text"),
+        ("title", "Сообщество", "text"), ("username", "Username", "text"),
+        ("chat_type", "Тип", "text"), ("participants", "Участники", "number"),
+        ("messages_24h", "Сообщения 24ч", "number"), ("messages_7d", "Сообщения 7д", "number"),
+        ("messages_30d", "Сообщения 30д", "number"), ("average_7d", "Среднее 7д", "number"),
+        ("average_30d", "Среднее 30д", "number"), ("active_authors", "Активные авторы", "number"),
+        ("views", "Просмотры", "number"), ("reactions", "Реакции", "number"),
+        ("engagement_rate", "ER", "number"), ("audience_growth", "Рост", "number"),
+        ("online_users", "Онлайн", "number"), ("can_write", "Можно писать", "boolean"),
+        ("voice_active", "Voice", "boolean"), ("last_activity", "Последняя активность", "date"),
+        ("discussion_url", "Обсуждение", "text"), ("language", "Язык", "text"),
+        ("score", "Рейтинг", "number"), ("collected_at", "Собрано", "date"),
+    )
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -224,6 +238,110 @@ class Database:
         rows = rows[max(0, offset):max(0, offset) + max(1, min(limit, 100000))]
         errors = self.errors(run_id)
         return {"run_id": run_id, "total": total, "rows": rows, "errors": errors}
+
+    def grid_data(self, run_id=None, query="", filters=None, sorts=None, limit=100, offset=0,
+                  group_by="", duplicate_field="") -> dict:
+        fields = {key: (label, kind) for key, label, kind in self.GRID_FIELDS}
+        if run_id is None:
+            row = self.connection.execute(
+                """SELECT r.id FROM runs r ORDER BY
+                   (EXISTS(SELECT 1 FROM results x WHERE x.run_id=r.id) OR
+                    EXISTS(SELECT 1 FROM candidates c WHERE c.run_id=r.id)) DESC, r.id DESC LIMIT 1"""
+            ).fetchone()
+            run_id = row["id"] if row else None
+        columns = [{"key": key, "label": label, "type": kind, "editable": False}
+                   for key, label, kind in self.GRID_FIELDS]
+        if run_id is None:
+            return {"run_id": None, "total": 0, "rows": [], "columns": columns,
+                    "summary": {}, "groups": [], "duplicates": []}
+
+        def expression(field):
+            if field == "chat_id":
+                return "chat_id"
+            if field == "status":
+                return "status"
+            return f"json_extract(payload, '$.{field}')"
+
+        where, params = ["run_id=?"], [run_id]
+        if query.strip():
+            like = f"%{query.strip()}%"
+            where.append("(json_extract(payload,'$.title') LIKE ? OR json_extract(payload,'$.username') LIKE ?)")
+            params.extend((like, like))
+        operations = {"eq": "=", "neq": "!=", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+        for item in filters or []:
+            field, operation, value = item.get("field"), item.get("op"), item.get("value")
+            if field not in fields:
+                continue
+            expr = expression(field)
+            if operation == "contains":
+                where.append(f"CAST({expr} AS TEXT) LIKE ?")
+                params.append(f"%{value}%")
+            elif operation == "empty":
+                where.append(f"({expr} IS NULL OR CAST({expr} AS TEXT)='')")
+            elif operation in operations:
+                where.append(f"{expr} {operations[operation]} ?")
+                params.append(value)
+        order = []
+        for item in sorts or []:
+            if item.get("field") in fields:
+                order.append(f"{expression(item['field'])} {'DESC' if item.get('dir') == 'desc' else 'ASC'}")
+        order_sql = ", ".join(order) if order else "chat_id ASC"
+        cte = """WITH grid_rows AS (
+            SELECT run_id,chat_id,payload,'processed' status FROM results WHERE run_id=?
+            UNION ALL
+            SELECT c.run_id,c.chat_id,c.payload,'found' status FROM candidates c
+            WHERE c.run_id=? AND NOT EXISTS(
+                SELECT 1 FROM results r WHERE r.run_id=c.run_id AND r.chat_id=c.chat_id)
+        )"""
+        # The run id is repeated inside the CTE and removed from the outer predicate parameters.
+        outer_params = params[1:]
+        predicate = " AND ".join(where[1:]) or "1=1"
+        base_params = [run_id, run_id, *outer_params]
+        total = self.connection.execute(
+            f"{cte} SELECT COUNT(*) FROM grid_rows WHERE {predicate}", base_params
+        ).fetchone()[0]
+        page_limit = max(1, min(int(limit), 1000))
+        page_offset = max(0, int(offset))
+        records = self.connection.execute(
+            f"{cte} SELECT chat_id,payload,status FROM grid_rows WHERE {predicate} "
+            f"ORDER BY {order_sql} LIMIT ? OFFSET ?", [*base_params, page_limit, page_offset]
+        )
+        rows = []
+        for record in records:
+            value = json.loads(record["payload"])
+            value["chat_id"], value["status"] = record["chat_id"], record["status"]
+            rows.append(value)
+
+        numeric = [key for key, _, kind in self.GRID_FIELDS if kind == "number"]
+        aggregates = []
+        for key in numeric:
+            expr = expression(key)
+            aggregates.extend((f"SUM({expr}) AS '{key}_sum'", f"AVG({expr}) AS '{key}_avg'"))
+        summary_row = self.connection.execute(
+            f"{cte} SELECT {','.join(aggregates)} FROM grid_rows WHERE {predicate}", base_params
+        ).fetchone()
+        summary = {key: {"sum": summary_row[f"{key}_sum"], "avg": summary_row[f"{key}_avg"]}
+                   for key in numeric}
+        groups = []
+        if group_by in fields:
+            expr = expression(group_by)
+            grouped = self.connection.execute(
+                f"{cte} SELECT {expr} value,COUNT(*) count FROM grid_rows WHERE {predicate} "
+                f"GROUP BY {expr} ORDER BY count DESC LIMIT 200", base_params
+            )
+            groups = [dict(row) for row in grouped]
+        duplicates = []
+        if duplicate_field in fields:
+            expr = expression(duplicate_field)
+            duplicate_rows = self.connection.execute(
+                f"{cte} SELECT {expr} value,COUNT(*) count FROM grid_rows WHERE {predicate} "
+                f"AND {expr} IS NOT NULL AND CAST({expr} AS TEXT)!='' GROUP BY {expr} "
+                f"HAVING COUNT(*)>1 ORDER BY count DESC LIMIT 200", base_params
+            )
+            duplicates = [dict(row) for row in duplicate_rows]
+        return {"run_id": run_id, "total": total, "rows": rows, "columns": columns,
+                "summary": summary, "groups": groups, "duplicates": duplicates,
+                "limit": page_limit, "offset": page_offset}
 
     def close(self):
         self.connection.close()
