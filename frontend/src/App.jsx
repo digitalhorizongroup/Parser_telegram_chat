@@ -289,6 +289,22 @@ function Dashboard({ user, onLogout }) {
   const done = data.live?.completed ?? data.completed ?? 0,
     total = data.live?.total ?? data.total ?? 0,
     pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const page = {
+      "/": "overview",
+      "/parsing": "parsing",
+      "/runs": "runs",
+      "/accounts": "accounts",
+      "/logs": "logs",
+      "/artifacts": "artifacts",
+    }[location.pathname] || "overview",
+    pageMeta = {
+      overview: ["CONTROL CENTER", `Добро пожаловать, ${user}`, "Общее состояние парсера и Telegram-аккаунтов."],
+      parsing: ["PARSING WORKSPACE", "Парсинг", "Запускайте поиск и следите за прогрессом в реальном времени."],
+      runs: ["RUN HISTORY", "Запуски", "История, статусы и результаты всех сканирований."],
+      accounts: ["ACCOUNT POOL", "Telegram-аккаунты", "Авторизация, загрузка и управление рабочими сессиями."],
+      logs: ["LIVE OUTPUT", "Логи", "Технические события и диагностика работы парсера."],
+      artifacts: ["DATA EXPORT", "Файлы и экспорт", "Таблица, Excel-отчёт, SQLite и управление данными."],
+    }[page];
   async function start(e) {
     e.preventDefault();
     setBusy(true);
@@ -350,29 +366,33 @@ function Dashboard({ user, onLogout }) {
           <small>Telegram Intelligence</small>
         </div>
         <nav>
-          <a className="active" href="#top">
+          <a className={page === "overview" ? "active" : ""} href="/">
             <BarChart3 />
             Обзор
           </a>
-          <a href="#scan">
+          <a className={page === "parsing" ? "active" : ""} href="/parsing">
             <Play />
-            Новый запуск
+            Парсинг
           </a>
-          <a href="#runs">
+          <a className={page === "runs" ? "active" : ""} href="/runs">
             <History />
             Запуски
           </a>
-          <a href="#accounts">
+          <a className={page === "accounts" ? "active" : ""} href="/accounts">
             <Users />
             Аккаунты
           </a>
-          <a href="#logs">
+          <a className={page === "logs" ? "active" : ""} href="/logs">
             <ScrollText />
             Логи
           </a>
-          <a href="#files">
+          <a href="/results">
+            <Activity />
+            Результаты
+          </a>
+          <a className={page === "artifacts" ? "active" : ""} href="/artifacts">
             <Database />
-            Артефакты
+            Файлы
           </a>
         </nav>
         <div className="account">
@@ -397,9 +417,9 @@ function Dashboard({ user, onLogout }) {
       <main className="content" id="top">
         <header>
           <div>
-            <span className="kicker">TELESCOPE / CONTROL CENTER</span>
-            <h1>Добро пожаловать, {user}</h1>
-            <p>Управляйте поиском, аккаунтами и аналитикой из одного окна.</p>
+            <span className="kicker">TELESCOPE / {pageMeta[0]}</span>
+            <h1>{pageMeta[1]}</h1>
+            <p>{pageMeta[2]}</p>
           </div>
           <div className="live">
             <i />
@@ -409,7 +429,7 @@ function Dashboard({ user, onLogout }) {
         {message && (
           <div className={`notice ${message.type}`}>{message.text}</div>
         )}
-        <section className="stats">
+        {page === "overview" && <section className="stats">
           <article>
             <div className="stat-icon cyan">
               <Users />
@@ -446,8 +466,8 @@ function Dashboard({ user, onLogout }) {
             </strong>
             <small>{data.process?.log || "SQLite checkpoint"}</small>
           </article>
-        </section>
-        <section className="progress-card">
+        </section>}
+        {(page === "overview" || page === "parsing") && <section className="progress-card">
           <div className="progress-accent" />
           <div>
             <div>
@@ -503,8 +523,15 @@ function Dashboard({ user, onLogout }) {
               );
             })}
           </div>
-        </section>
-        <section className="panel" id="scan">
+        </section>}
+        {page === "overview" && (
+          <section className="quick-grid">
+            <a href="/parsing"><Play /><span><b>Новый парсинг</b><small>Запустить или продолжить поиск</small></span><ArrowRight /></a>
+            <a href="/results"><BarChart3 /><span><b>Открыть результаты</b><small>Таблица собранных сообществ</small></span><ArrowRight /></a>
+            <a href="/accounts"><Users /><span><b>Управлять аккаунтами</b><small>{accounts.length} Telegram-сессий подключено</small></span><ArrowRight /></a>
+          </section>
+        )}
+        {page === "parsing" && <section className="panel page-panel" id="scan">
           <div className="panel-title">
             <div>
               <span className="kicker">NEW INTELLIGENCE RUN</span>
@@ -619,8 +646,8 @@ function Dashboard({ user, onLogout }) {
               <ArrowRight size={18} />
             </button>
           </form>
-        </section>
-        <section className="panel" id="runs">
+        </section>}
+        {page === "runs" && <section className="panel page-panel" id="runs">
           <div className="panel-title">
             <div>
               <span className="kicker">RUN HISTORY</span>
@@ -666,8 +693,8 @@ function Dashboard({ user, onLogout }) {
               </tbody>
             </table>
           </div>
-        </section>
-        <section className="panel" id="accounts">
+        </section>}
+        {page === "accounts" && <section className="panel page-panel" id="accounts">
           <div className="panel-title">
             <div>
               <span className="kicker">ACCOUNT POOL</span>
@@ -703,8 +730,8 @@ function Dashboard({ user, onLogout }) {
               </div>
             )}
           </div>
-        </section>
-        <section className="panel" id="logs">
+        </section>}
+        {page === "logs" && <section className="panel page-panel" id="logs">
           <div className="panel-title">
             <div>
               <span className="kicker">LIVE OUTPUT</span>
@@ -730,8 +757,8 @@ function Dashboard({ user, onLogout }) {
           <pre className="terminal">
             {logs.content || "Лог появится после запуска сканирования."}
           </pre>
-        </section>
-        <section className="panel" id="files">
+        </section>}
+        {page === "artifacts" && <section className="panel page-panel" id="files">
           <div className="panel-title">
             <div>
               <span className="kicker">ARTIFACTS</span>
@@ -762,7 +789,7 @@ function Dashboard({ user, onLogout }) {
               Удалить все сессии
             </button>
           </div>
-        </section>
+        </section>}
       </main>
     </div>
   );
