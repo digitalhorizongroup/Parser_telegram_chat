@@ -176,15 +176,17 @@ def account_send_code():
     token = secrets.token_urlsafe(24)
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     path = SESSIONS_DIR / f"pending_{token}.session"
-    client = create_client(path)
     async def send():
-        await asyncio.wait_for(client.connect(), timeout=25)
-        return await asyncio.wait_for(client.send_code_request(phone), timeout=30)
+        client = create_client(path)
+        try:
+            await asyncio.wait_for(client.connect(), timeout=25)
+            return await asyncio.wait_for(client.send_code_request(phone), timeout=30)
+        finally:
+            await client.disconnect()
+            client.session.close()
     try:
         sent = asyncio.run(send())
-        client.session.close()
     except Exception as exc:
-        _close_client(client)
         path.unlink(missing_ok=True)
         message, status = _login_error(exc)
         return jsonify(error=message), status
@@ -204,22 +206,24 @@ def account_confirm():
         state = pending_logins.get(token)
     if not state or time.time() - state["created"] > 600:
         return jsonify(error="Сессия авторизации истекла. Запросите код заново."), 400
-    client = create_client(Path(state["path"]))
     async def confirm():
-        await asyncio.wait_for(client.connect(), timeout=25)
+        client = create_client(Path(state["path"]))
         try:
-            await asyncio.wait_for(client.sign_in(state["phone"], code, phone_code_hash=state["phone_code_hash"]), timeout=30)
-        except SessionPasswordNeededError:
-            if not password:
-                return None
-            await asyncio.wait_for(client.sign_in(password=password), timeout=30)
-        return await asyncio.wait_for(client.get_me(), timeout=20)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                await asyncio.wait_for(client.sign_in(state["phone"], code, phone_code_hash=state["phone_code_hash"]), timeout=30)
+            except SessionPasswordNeededError:
+                if not password:
+                    return None
+                await asyncio.wait_for(client.sign_in(password=password), timeout=30)
+            return await asyncio.wait_for(client.get_me(), timeout=20)
+        finally:
+            await client.disconnect()
+            client.session.close()
     try:
         me = asyncio.run(confirm())
         if me is None:
-            _close_client(client)
             return jsonify(ok=True, requires_password=True, message="Введите пароль двухэтапной аутентификации.")
-        _close_client(client)
         path = Path(state["path"])
         content = path.read_bytes()
         destination = SESSIONS_DIR / f"session_{hashlib.sha256(content).hexdigest()[:24]}.session"
@@ -228,7 +232,6 @@ def account_confirm():
             pending_logins.pop(token, None)
         return jsonify(ok=True, authorized=True, account={"id": me.id, "name": " ".join(x for x in [me.first_name, me.last_name] if x)})
     except Exception as exc:
-        _close_client(client)
         message, status = _login_error(exc)
         return jsonify(error=message), status
 
