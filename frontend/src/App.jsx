@@ -449,8 +449,9 @@ function Dashboard({ user, onLogout }) {
               </span>
               {data.running && total > 0 && (
                 <span>
-                  Обработано {done} из {total} · осталось{" "}
-                  {Math.max(0, total - done)}
+                  {data.live?.phase === "searching"
+                    ? `Проверено запросов ${done} из ${total} · найдено сообществ ${data.live?.found ?? 0}`
+                    : `Обработано ${done} из ${total} · осталось ${Math.max(0, total - done)}`}
                 </span>
               )}
             </div>

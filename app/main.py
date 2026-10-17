@@ -57,7 +57,10 @@ async def check_voice_chats(filters: FilterConfig | None = None):
     run_id, resumed = db.start_or_resume(_fingerprint(filters))
     clients, uploaded_sessions = create_clients()
     logger.info("Запуск #%s%s", run_id, " (возобновлён)" if resumed else "")
-    update_progress(run_id=run_id, phase="connecting", phase_label="Подключение аккаунтов", completed=0, total=0, current="")
+    update_progress(
+        run_id=run_id, phase="connecting", phase_label="Подключение аккаунтов",
+        completed=0, total=len(clients), remaining=len(clients), current="", found=0, error="",
+    )
 
     active_clients = []
     try:
@@ -94,12 +97,17 @@ async def check_voice_chats(filters: FilterConfig | None = None):
 
         limiters = [TelegramLimiter(1, REQUEST_DELAY, REQUEST_RETRIES) for _ in active_clients]
         logger.info("Активных сессий: %s", len(active_clients))
-        update_progress(phase="searching", phase_label="Поиск сообществ", active_sessions=len(active_clients), current="Telegram search")
+        keyword_count = len(load_keywords())
+        update_progress(
+            phase="searching", phase_label="Поиск сообществ", active_sessions=len(active_clients),
+            completed=0, total=keyword_count, remaining=keyword_count,
+            current="Подготовка поиска", found=0, error="",
+        )
         groups = await search_groups(active_clients, limiters)
         db.set_total(run_id, len(groups))
         processed = db.processed_ids(run_id)
         completed_count = len(processed)
-        update_progress(phase="processing", phase_label="Анализ сообществ", total=len(groups), completed=completed_count, remaining=max(0, len(groups)-completed_count))
+        update_progress(phase="processing", phase_label="Анализ сообществ", total=len(groups), completed=completed_count, remaining=max(0, len(groups)-completed_count), current="", found=len(groups), error="")
 
         async def process(chat, client, limiter):
             nonlocal completed_count
