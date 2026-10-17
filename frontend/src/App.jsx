@@ -1,34 +1,884 @@
-import {useEffect, useRef, useState} from 'react';
-import {Activity, ArrowRight, BarChart3, Database, Download, FileText, History, LogOut, Play, Radio, ScrollText, ShieldCheck, Square, Trash2, UploadCloud, Users, Wifi} from 'lucide-react';
-import {api, setCsrf} from './api';
-import './url-field.css';
-import './management.css';
-import './phone-auth.css';
-import './results.css';
+import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  ArrowRight,
+  BarChart3,
+  Database,
+  Download,
+  FileText,
+  History,
+  LogOut,
+  Play,
+  Radio,
+  ScrollText,
+  ShieldCheck,
+  Square,
+  Trash2,
+  UploadCloud,
+  Users,
+  Wifi,
+} from "lucide-react";
+import { api, setCsrf } from "./api";
+import "./url-field.css";
+import "./management.css";
+import "./phone-auth.css";
+import "./results.css";
+import "./live-results.css";
 
-const initial={status:'idle',total:0,completed:0,sessions:0,running:false,report:false,database:false};
-const fmtDate=value=>value?new Date(value).toLocaleString('ru-RU'):'—';
-const fmtSize=value=>value<1024?`${value} Б`:`${(value/1024).toFixed(1)} КБ`;
-function Login({onLogin}){const[busy,setBusy]=useState(false),[error,setError]=useState('');async function submit(e){e.preventDefault();setBusy(true);setError('');const f=new FormData(e.currentTarget);try{const data=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:f.get('username'),password:f.get('password')})});setCsrf(data.csrf);onLogin(data)}catch(x){setError(x.message)}finally{setBusy(false)}}return <main className="login-page"><div className="glow one"/><div className="glow two"/><form className="login-card" onSubmit={submit}><Logo/><span className="kicker">TELEGRAM INTELLIGENCE</span><h1>Возвращайтесь к данным</h1><p>Войдите в защищённый центр управления.</p>{error&&<div className="notice error">{error}</div>}<label>Логин<input name="username" autoComplete="username" required autoFocus/></label><label>Пароль<input name="password" type="password" autoComplete="current-password" required/></label><button disabled={busy}>{busy?'Проверка…':'Войти'}<ArrowRight size={18}/></button></form></main>}
-function Logo(){return <div className="logo"><span><Radio size={19}/></span>TeleScope</div>}
-function Drop({name,multiple,accept,icon:Icon,title,subtitle,onChange}){return <label className="drop"><input type="file" name={name} multiple={multiple} accept={accept} onChange={onChange}/><Icon size={27}/><b>{title}</b><small>{subtitle}</small></label>}
-function PhoneAuth({onDone,onMessage}){const[phone,setPhone]=useState(''),[code,setCode]=useState(''),[password,setPassword]=useState(''),[token,setToken]=useState(''),[needsPassword,setNeedsPassword]=useState(false),[busy,setBusy]=useState(false),[status,setStatus]=useState('');function reset(){setPhone('');setCode('');setPassword('');setToken('');setNeedsPassword(false);setStatus('')}async function send(){setBusy(true);setStatus('Отправляем запрос в Telegram…');try{const r=await api('/api/accounts/send-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});setToken(r.token);setStatus('Код отправлен. Проверьте сообщения от Telegram.')}catch(x){setStatus(x.message);onMessage({type:'error',text:x.message})}finally{setBusy(false)}}async function confirm(){setBusy(true);setStatus('Проверяем код…');try{const r=await api('/api/accounts/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,code,password})});if(r.requires_password){setNeedsPassword(true);setStatus(r.message)}else{onMessage({type:'ok',text:`Аккаунт ${r.account?.name||''} авторизован.`});reset();onDone()}}catch(x){setStatus(x.message);onMessage({type:'error',text:x.message})}finally{setBusy(false)}}return <div className="phone-auth"><div><b>Авторизация по номеру</b><small>Можно вводить цифрами без «+». Код обычно приходит в приложение Telegram.</small></div><div className="auth-fields"><input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Код страны и номер" disabled={!!token}/>{token&&<input value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} placeholder="Код Telegram"/>}{needsPassword&&<input value={password} onChange={e=>setPassword(e.target.value)} type="password" placeholder="Пароль 2FA"/>}<button type="button" onClick={token?confirm:send} disabled={busy||(!token&&!phone)||(token&&!code)}>{busy?'Подождите…':token?(needsPassword?'Подтвердить 2FA':'Подтвердить код'):'Получить код'}</button></div>{status&&<div className="auth-status">{status}</div>}{token&&<button type="button" className="auth-reset" onClick={reset} disabled={busy}>Изменить номер / начать заново</button>}</div>}
-function Dashboard({user,onLogout}){
- const[data,setData]=useState(initial),[runs,setRuns]=useState([]),[accounts,setAccounts]=useState([]),[logs,setLogs]=useState({files:[],content:'',selected:''}),[message,setMessage]=useState(null),[busy,setBusy]=useState(false),[sessionNames,setSessionNames]=useState([]),[keywordName,setKeywordName]=useState('');const form=useRef();
- async function refresh(){try{const[d,r,a,l]=await Promise.all([api('/api/dashboard'),api('/api/runs'),api('/api/accounts'),api('/api/logs')]);setData(d);setRuns(r.runs);setAccounts(a.accounts);setLogs(l)}catch(e){if(e.message==='authentication_required')onLogout()}}
- async function loadLog(name){try{setLogs(await api(`/api/logs?name=${encodeURIComponent(name)}`))}catch(x){setMessage({type:'error',text:x.message})}}
- useEffect(()=>{refresh();const timer=setInterval(refresh,2000);return()=>clearInterval(timer)},[]);const done=data.live?.completed??data.completed??0,total=data.live?.total??data.total??0,pct=total?Math.min(100,Math.round(done/total*100)):0;
- async function start(e){e.preventDefault();setBusy(true);setMessage(null);try{const body=new FormData(e.currentTarget);const result=await api('/api/start',{method:'POST',body});setMessage({type:'ok',text:`Запуск создан. Новых аккаунтов: ${result.uploaded}. Лог: ${result.log}`});refresh()}catch(x){setMessage({type:'error',text:x.message})}finally{setBusy(false)}}
- async function stop(){if(!confirm('Остановить текущий запуск? Прогресс останется в SQLite.'))return;try{await api('/api/stop',{method:'POST'});setMessage({type:'ok',text:'Запуск остановлен. Его можно продолжить повторным запуском.'});refresh()}catch(x){setMessage({type:'error',text:x.message})}}
- async function clear(){if(!confirm('Удалить все Telegram-сессии?'))return;try{const r=await api('/api/sessions',{method:'DELETE'});setMessage({type:'ok',text:`Удалено: ${r.removed}`});refresh()}catch(x){setMessage({type:'error',text:x.message})}}
- async function removeAccount(name){if(!confirm('Удалить этот аккаунт?'))return;try{await api(`/api/accounts/${encodeURIComponent(name)}`,{method:'DELETE'});refresh()}catch(x){setMessage({type:'error',text:x.message})}}
- return <div className="layout"><aside><Logo/><nav><a className="active" href="#top"><BarChart3/>Обзор</a><a href="#scan"><Play/>Новый запуск</a><a href="#runs"><History/>Запуски</a><a href="#accounts"><Users/>Аккаунты</a><a href="#logs"><ScrollText/>Логи</a><a href="#files"><Database/>Артефакты</a></nav><div className="account"><span>{user?.[0]?.toUpperCase()}</span><div><b>{user}</b><small>Администратор</small></div></div><button className="logout" onClick={onLogout}><LogOut size={17}/>Выйти</button></aside><main className="content" id="top"><header><div><span className="kicker">CONTROL CENTER</span><h1>Центр управления</h1><p>Мультиаккаунтная Telegram-аналитика</p></div><div className="live"><i/><span>{data.running?'Сканирование':'Система готова'}</span></div></header>{message&&<div className={`notice ${message.type}`}>{message.text}</div>}
- <section className="stats"><article><div className="stat-icon cyan"><Users/></div><span>Аккаунты</span><strong>{data.sessions}</strong><small>Сессии в хранилище</small></article><article><div className="stat-icon blue"><Activity/></div><span>Прогресс</span><strong>{pct}%</strong><small>{data.completed||0} / {data.total||0} обработано</small></article><article><div className="stat-icon purple"><Wifi/></div><span>Статус</span><strong>{data.running?'Работает':data.exit_code>0?'Ошибка':data.status==='completed'?'Готово':'Ожидание'}</strong><small>{data.process?.log||'SQLite checkpoint'}</small></article></section>
- <section className="progress-card"><div><div><b>{data.live?.phase_label||'Текущая очередь'}</b><span>{data.running?(data.live?.current||`PID ${data.process?.pid} · подготовка`):data.live?.phase==='failed'?(data.live?.error||'Ошибка запуска'):'Нет активного запуска'}</span>{data.running&&total>0&&<span>Обработано {done} из {total} · осталось {Math.max(0,total-done)}</span>}</div><div className="run-controls"><b>{total?`${pct}%`:'…'}</b>{data.running&&<button className="stop" onClick={stop}><Square size={14}/>Остановить</button>}</div></div><div className="progress"><i style={{width:`${pct}%`}}/></div></section>
- <section className="panel" id="scan"><div className="panel-title"><div><span className="kicker">NEW INTELLIGENCE RUN</span><h2>Новое сканирование</h2></div><span className="pill"><ShieldCheck size={14}/> MULTI-SESSION</span></div><form ref={form} onSubmit={start}><div className="uploads"><Drop name="sessions" multiple accept=".session,.zip,application/zip" icon={UploadCloud} title={sessionNames.length?`${sessionNames.length} файлов выбрано`:'Telegram аккаунты'} subtitle={sessionNames.length?sessionNames.join(', '):'Несколько ZIP или .session — имена не важны'} onChange={e=>setSessionNames([...e.target.files].map(x=>x.name))}/><Drop name="keywords" accept=".txt" icon={FileText} title={keywordName||'Ключевые слова'} subtitle="TXT · один запрос на строку" onChange={e=>setKeywordName(e.target.files[0]?.name||'')}/></div><label className="url-field">Ссылки на ZIP с аккаунтами<textarea name="session_urls" rows="4" placeholder={'https://2zie.com/file/.../account.zip\nhttps://2zie.com/file/.../account2.zip'}/><small>До 20 ссылок 2zie.com, по одной на строку</small></label><div className="fields"><label>Мин. участников<input type="number" name="min_users" defaultValue="1" min="0"/></label><label>Мин. сообщений / 24ч<input type="number" name="min_messages" defaultValue="0" min="0"/></label><label>Язык<select name="language" defaultValue=""><option value="">Любой</option><option value="ru">Русский</option><option value="uk">Украинский</option><option value="en">Английский</option></select></label><label>Исключающие слова<input name="exclude" placeholder="casino, spam"/></label></div><div className="checks"><label><input type="checkbox" name="active_only"/><span>Только активные</span></label><label><input type="checkbox" name="public_only"/><span>Только публичные</span></label><label><input type="checkbox" name="writable_only"/><span>Можно писать</span></label></div><button className="launch" disabled={busy||data.running}>{busy?'Запуск…':data.running?'Сканирование идёт':'Запустить сканирование'}<ArrowRight size={18}/></button></form></section>
- <section className="panel" id="runs"><div className="panel-title"><div><span className="kicker">RUN HISTORY</span><h2>История запусков</h2></div><span className="pill">{runs.length} запусков</span></div><div className="table-wrap"><table><thead><tr><th>ID</th><th>Начало</th><th>Статус</th><th>Прогресс</th><th>Результаты</th><th>Ошибки</th></tr></thead><tbody>{runs.length?runs.map(r=><tr key={r.id}><td>#{r.id}</td><td>{fmtDate(r.started_at)}</td><td><span className={`status ${r.status}`}>{r.status}</span></td><td>{r.completed}/{r.total}</td><td>{r.results_count}</td><td>{r.errors_count}</td></tr>):<tr><td colSpan="6" className="empty">Запусков пока нет</td></tr>}</tbody></table></div></section>
- <section className="panel" id="accounts"><div className="panel-title"><div><span className="kicker">ACCOUNT POOL</span><h2>Telegram-аккаунты</h2></div><span className="pill">{accounts.length} сессий</span></div><PhoneAuth onDone={refresh} onMessage={setMessage}/><div className="account-list">{accounts.length?accounts.map((a,i)=><article key={a.name}><span className="avatar">{i+1}</span><div><b>Аккаунт {i+1}</b><small>{a.name} · {fmtSize(a.size)} · {fmtDate(a.updated_at)}</small></div><span className="status ready">загружен</span><button className="icon-danger" onClick={()=>removeAccount(a.name)} title="Удалить"><Trash2 size={16}/></button></article>):<div className="empty">Добавьте ZIP, .session или авторизуйтесь по номеру</div>}</div></section>
- <section className="panel" id="logs"><div className="panel-title"><div><span className="kicker">LIVE OUTPUT</span><h2>Логи парсера</h2></div><div className="log-actions"><select value={logs.selected} onChange={e=>loadLog(e.target.value)}>{logs.files.map(x=><option key={x.name}>{x.name}</option>)}</select>{logs.selected&&<a href={`/download/logs/${encodeURIComponent(logs.selected)}`}><Download size={15}/>Скачать</a>}</div></div><pre className="terminal">{logs.content||'Лог появится после запуска сканирования.'}</pre></section>
- <section className="panel" id="files"><div className="panel-title"><div><span className="kicker">ARTIFACTS</span><h2>Артефакты</h2></div></div><div className="actions"><a href="/results"><BarChart3/>Открыть таблицу результатов</a><a className={!data.report?'disabled':''} href="/download/report"><Download/>Скачать Excel</a><a className={!data.database?'disabled':''} href="/download/database"><Database/>Скачать SQLite</a><button className="danger" onClick={clear}><Trash2/>Удалить все сессии</button></div></section></main></div>}
-function ResultsPage(){const[data,setData]=useState({rows:[],errors:[],runs:[],total:0,run_id:null}),[query,setQuery]=useState(''),[runId,setRunId]=useState('');async function load(run=runId,q=query){const params=new URLSearchParams({limit:'1000'});if(run)params.set('run_id',run);if(q)params.set('q',q);setData(await api(`/api/results?${params}`))}useEffect(()=>{load()},[]);const csv=new URLSearchParams();if(data.run_id)csv.set('run_id',data.run_id);if(query)csv.set('q',query);return <main className="results-page"><header><Logo/><div><a href="/">← Панель управления</a><h1>Результаты парсинга</h1><p>Уже собранные данные сохраняются здесь даже при остановке запуска.</p></div></header><section className="result-tools"><select value={runId||data.run_id||''} onChange={e=>{setRunId(e.target.value);load(e.target.value,query)}}>{data.runs.map(r=><option key={r.id} value={r.id}>Запуск #{r.id} · {fmtDate(r.started_at)}</option>)}</select><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==='Enter'&&load()} placeholder="Поиск по названию или username"/><button onClick={()=>load()}>Найти</button><a href={`/download/results.csv?${csv}`}><Download size={16}/>CSV</a><a href="/download/report"><Download size={16}/>Excel</a></section><div className="result-summary">Найдено: <b>{data.total}</b> · ошибок/отфильтровано: <b>{data.errors.length}</b></div><section className="result-table"><table><thead><tr><th>Сообщество</th><th>Тип</th><th>Участники</th><th>24 часа</th><th>7 дней</th><th>30 дней</th><th>Авторы</th><th>Просмотры</th><th>Реакции</th><th>ER</th><th>Рейтинг</th></tr></thead><tbody>{data.rows.map(r=><tr key={r.chat_id}><td><b>{r.title}</b>{r.username&&<a href={`https://t.me/${r.username}`} target="_blank">@{r.username}</a>}</td><td>{r.chat_type}</td><td>{r.participants??'—'}</td><td>{r.messages_24h}</td><td>{r.messages_7d}</td><td>{r.messages_30d}</td><td>{r.active_authors}</td><td>{r.views}</td><td>{r.reactions}</td><td>{r.engagement_rate}</td><td>{r.score}</td></tr>)}{!data.rows.length&&<tr><td colSpan="11" className="empty">В выбранном запуске пока нет результатов</td></tr>}</tbody></table></section></main>}
-export default function App(){const[loading,setLoading]=useState(true),[user,setUser]=useState(null);useEffect(()=>{api('/api/session').then(x=>{setCsrf(x.csrf);setUser(x.authenticated?x.username:null)}).finally(()=>setLoading(false))},[]);async function logout(){try{await api('/api/logout',{method:'POST'})}finally{setUser(null);const s=await api('/api/session');setCsrf(s.csrf)}}if(loading)return <div className="splash"><Logo/></div>;if(!user)return <Login onLogin={x=>setUser(x.username)}/>;return location.pathname==='/results'?<ResultsPage/>:<Dashboard user={user} onLogout={logout}/>}
+const initial = {
+  status: "idle",
+  total: 0,
+  completed: 0,
+  sessions: 0,
+  running: false,
+  report: false,
+  database: false,
+};
+const fmtDate = (value) =>
+  value ? new Date(value).toLocaleString("ru-RU") : "—";
+const fmtSize = (value) =>
+  value < 1024 ? `${value} Б` : `${(value / 1024).toFixed(1)} КБ`;
+function Login({ onLogin }) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const f = new FormData(e.currentTarget);
+    try {
+      const data = await api("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: f.get("username"),
+          password: f.get("password"),
+        }),
+      });
+      setCsrf(data.csrf);
+      onLogin(data);
+    } catch (x) {
+      setError(x.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main className="login-page">
+      <div className="glow one" />
+      <div className="glow two" />
+      <form className="login-card" onSubmit={submit}>
+        <Logo />
+        <span className="kicker">TELEGRAM INTELLIGENCE</span>
+        <h1>Возвращайтесь к данным</h1>
+        <p>Войдите в защищённый центр управления.</p>
+        {error && <div className="notice error">{error}</div>}
+        <label>
+          Логин
+          <input name="username" autoComplete="username" required autoFocus />
+        </label>
+        <label>
+          Пароль
+          <input
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+          />
+        </label>
+        <button disabled={busy}>
+          {busy ? "Проверка…" : "Войти"}
+          <ArrowRight size={18} />
+        </button>
+      </form>
+    </main>
+  );
+}
+function Logo() {
+  return (
+    <div className="logo">
+      <span>
+        <Radio size={19} />
+      </span>
+      TeleScope
+    </div>
+  );
+}
+function Drop({
+  name,
+  multiple,
+  accept,
+  icon: Icon,
+  title,
+  subtitle,
+  onChange,
+}) {
+  return (
+    <label className="drop">
+      <input
+        type="file"
+        name={name}
+        multiple={multiple}
+        accept={accept}
+        onChange={onChange}
+      />
+      <Icon size={27} />
+      <b>{title}</b>
+      <small>{subtitle}</small>
+    </label>
+  );
+}
+function PhoneAuth({ onDone, onMessage }) {
+  const [phone, setPhone] = useState(""),
+    [code, setCode] = useState(""),
+    [password, setPassword] = useState(""),
+    [token, setToken] = useState(""),
+    [needsPassword, setNeedsPassword] = useState(false),
+    [busy, setBusy] = useState(false),
+    [status, setStatus] = useState("");
+  function reset() {
+    setPhone("");
+    setCode("");
+    setPassword("");
+    setToken("");
+    setNeedsPassword(false);
+    setStatus("");
+  }
+  async function send() {
+    setBusy(true);
+    setStatus("Отправляем запрос в Telegram…");
+    try {
+      const r = await api("/api/accounts/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      setToken(r.token);
+      setStatus("Код отправлен. Проверьте сообщения от Telegram.");
+    } catch (x) {
+      setStatus(x.message);
+      onMessage({ type: "error", text: x.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function confirm() {
+    setBusy(true);
+    setStatus("Проверяем код…");
+    try {
+      const r = await api("/api/accounts/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, code, password }),
+      });
+      if (r.requires_password) {
+        setNeedsPassword(true);
+        setStatus(r.message);
+      } else {
+        onMessage({
+          type: "ok",
+          text: `Аккаунт ${r.account?.name || ""} авторизован.`,
+        });
+        reset();
+        onDone();
+      }
+    } catch (x) {
+      setStatus(x.message);
+      onMessage({ type: "error", text: x.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="phone-auth">
+      <div>
+        <b>Авторизация по номеру</b>
+        <small>
+          Можно вводить цифрами без «+». Код обычно приходит в приложение
+          Telegram.
+        </small>
+      </div>
+      <div className="auth-fields">
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="Код страны и номер"
+          disabled={!!token}
+        />
+        {token && (
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            placeholder="Код Telegram"
+          />
+        )}
+        {needsPassword && (
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            placeholder="Пароль 2FA"
+          />
+        )}
+        <button
+          type="button"
+          onClick={token ? confirm : send}
+          disabled={busy || (!token && !phone) || (token && !code)}
+        >
+          {busy
+            ? "Подождите…"
+            : token
+              ? needsPassword
+                ? "Подтвердить 2FA"
+                : "Подтвердить код"
+              : "Получить код"}
+        </button>
+      </div>
+      {status && <div className="auth-status">{status}</div>}
+      {token && (
+        <button
+          type="button"
+          className="auth-reset"
+          onClick={reset}
+          disabled={busy}
+        >
+          Изменить номер / начать заново
+        </button>
+      )}
+    </div>
+  );
+}
+function Dashboard({ user, onLogout }) {
+  const [data, setData] = useState(initial),
+    [runs, setRuns] = useState([]),
+    [accounts, setAccounts] = useState([]),
+    [logs, setLogs] = useState({ files: [], content: "", selected: "" }),
+    [message, setMessage] = useState(null),
+    [busy, setBusy] = useState(false),
+    [sessionNames, setSessionNames] = useState([]),
+    [keywordName, setKeywordName] = useState("");
+  const form = useRef();
+  async function refresh() {
+    try {
+      const [d, r, a, l] = await Promise.all([
+        api("/api/dashboard"),
+        api("/api/runs"),
+        api("/api/accounts"),
+        api("/api/logs"),
+      ]);
+      setData(d);
+      setRuns(r.runs);
+      setAccounts(a.accounts);
+      setLogs(l);
+    } catch (e) {
+      if (e.message === "authentication_required") onLogout();
+    }
+  }
+  async function loadLog(name) {
+    try {
+      setLogs(await api(`/api/logs?name=${encodeURIComponent(name)}`));
+    } catch (x) {
+      setMessage({ type: "error", text: x.message });
+    }
+  }
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, 2000);
+    return () => clearInterval(timer);
+  }, []);
+  const done = data.live?.completed ?? data.completed ?? 0,
+    total = data.live?.total ?? data.total ?? 0,
+    pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  async function start(e) {
+    e.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      const body = new FormData(e.currentTarget);
+      const result = await api("/api/start", { method: "POST", body });
+      setMessage({
+        type: "ok",
+        text: `Запуск создан. Новых аккаунтов: ${result.uploaded}. Лог: ${result.log}`,
+      });
+      refresh();
+    } catch (x) {
+      setMessage({ type: "error", text: x.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function stop() {
+    if (!confirm("Остановить текущий запуск? Прогресс останется в SQLite."))
+      return;
+    try {
+      await api("/api/stop", { method: "POST" });
+      setMessage({
+        type: "ok",
+        text: "Запуск остановлен. Его можно продолжить повторным запуском.",
+      });
+      refresh();
+    } catch (x) {
+      setMessage({ type: "error", text: x.message });
+    }
+  }
+  async function clear() {
+    if (!confirm("Удалить все Telegram-сессии?")) return;
+    try {
+      const r = await api("/api/sessions", { method: "DELETE" });
+      setMessage({ type: "ok", text: `Удалено: ${r.removed}` });
+      refresh();
+    } catch (x) {
+      setMessage({ type: "error", text: x.message });
+    }
+  }
+  async function removeAccount(name) {
+    if (!confirm("Удалить этот аккаунт?")) return;
+    try {
+      await api(`/api/accounts/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      });
+      refresh();
+    } catch (x) {
+      setMessage({ type: "error", text: x.message });
+    }
+  }
+  return (
+    <div className="layout">
+      <aside>
+        <Logo />
+        <nav>
+          <a className="active" href="#top">
+            <BarChart3 />
+            Обзор
+          </a>
+          <a href="#scan">
+            <Play />
+            Новый запуск
+          </a>
+          <a href="#runs">
+            <History />
+            Запуски
+          </a>
+          <a href="#accounts">
+            <Users />
+            Аккаунты
+          </a>
+          <a href="#logs">
+            <ScrollText />
+            Логи
+          </a>
+          <a href="#files">
+            <Database />
+            Артефакты
+          </a>
+        </nav>
+        <div className="account">
+          <span>{user?.[0]?.toUpperCase()}</span>
+          <div>
+            <b>{user}</b>
+            <small>Администратор</small>
+          </div>
+        </div>
+        <button className="logout" onClick={onLogout}>
+          <LogOut size={17} />
+          Выйти
+        </button>
+      </aside>
+      <main className="content" id="top">
+        <header>
+          <div>
+            <span className="kicker">CONTROL CENTER</span>
+            <h1>Центр управления</h1>
+            <p>Мультиаккаунтная Telegram-аналитика</p>
+          </div>
+          <div className="live">
+            <i />
+            <span>{data.running ? "Сканирование" : "Система готова"}</span>
+          </div>
+        </header>
+        {message && (
+          <div className={`notice ${message.type}`}>{message.text}</div>
+        )}
+        <section className="stats">
+          <article>
+            <div className="stat-icon cyan">
+              <Users />
+            </div>
+            <span>Аккаунты</span>
+            <strong>{data.sessions}</strong>
+            <small>Сессии в хранилище</small>
+          </article>
+          <article>
+            <div className="stat-icon blue">
+              <Activity />
+            </div>
+            <span>Прогресс</span>
+            <strong>{pct}%</strong>
+            <small>
+              {data.completed || 0} / {data.total || 0} обработано
+            </small>
+          </article>
+          <article>
+            <div className="stat-icon purple">
+              <Wifi />
+            </div>
+            <span>Статус</span>
+            <strong>
+              {data.running
+                ? "Работает"
+                : data.exit_code > 0
+                  ? "Ошибка"
+                  : data.status === "completed"
+                    ? "Готово"
+                    : "Ожидание"}
+            </strong>
+            <small>{data.process?.log || "SQLite checkpoint"}</small>
+          </article>
+        </section>
+        <section className="progress-card">
+          <div>
+            <div>
+              <b>{data.live?.phase_label || "Текущая очередь"}</b>
+              <span>
+                {data.running
+                  ? data.live?.current ||
+                    `PID ${data.process?.pid} · подготовка`
+                  : data.live?.phase === "failed"
+                    ? data.live?.error || "Ошибка запуска"
+                    : "Нет активного запуска"}
+              </span>
+              {data.running && total > 0 && (
+                <span>
+                  Обработано {done} из {total} · осталось{" "}
+                  {Math.max(0, total - done)}
+                </span>
+              )}
+            </div>
+            <div className="run-controls">
+              <b>{total ? `${pct}%` : "…"}</b>
+              {data.running && (
+                <button className="stop" onClick={stop}>
+                  <Square size={14} />
+                  Остановить
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="progress">
+            <i style={{ width: `${pct}%` }} />
+          </div>
+        </section>
+        <section className="panel" id="scan">
+          <div className="panel-title">
+            <div>
+              <span className="kicker">NEW INTELLIGENCE RUN</span>
+              <h2>Новое сканирование</h2>
+            </div>
+            <span className="pill">
+              <ShieldCheck size={14} /> MULTI-SESSION
+            </span>
+          </div>
+          <form ref={form} onSubmit={start}>
+            <div className="uploads">
+              <Drop
+                name="sessions"
+                multiple
+                accept=".session,.zip,application/zip"
+                icon={UploadCloud}
+                title={
+                  sessionNames.length
+                    ? `${sessionNames.length} файлов выбрано`
+                    : "Telegram аккаунты"
+                }
+                subtitle={
+                  sessionNames.length
+                    ? sessionNames.join(", ")
+                    : "Несколько ZIP или .session — имена не важны"
+                }
+                onChange={(e) =>
+                  setSessionNames([...e.target.files].map((x) => x.name))
+                }
+              />
+              <Drop
+                name="keywords"
+                accept=".txt"
+                icon={FileText}
+                title={keywordName || "Ключевые слова"}
+                subtitle="TXT · один запрос на строку"
+                onChange={(e) => setKeywordName(e.target.files[0]?.name || "")}
+              />
+            </div>
+            <label className="url-field">
+              Ссылки на ZIP с аккаунтами
+              <textarea
+                name="session_urls"
+                rows="4"
+                placeholder={
+                  "https://2zie.com/file/.../account.zip\nhttps://2zie.com/file/.../account2.zip"
+                }
+              />
+              <small>До 20 ссылок 2zie.com, по одной на строку</small>
+            </label>
+            <div className="fields">
+              <label>
+                Мин. участников
+                <input
+                  type="number"
+                  name="min_users"
+                  defaultValue="1"
+                  min="0"
+                />
+              </label>
+              <label>
+                Мин. сообщений / 24ч
+                <input
+                  type="number"
+                  name="min_messages"
+                  defaultValue="0"
+                  min="0"
+                />
+              </label>
+              <label>
+                Язык
+                <select name="language" defaultValue="">
+                  <option value="">Любой</option>
+                  <option value="ru">Русский</option>
+                  <option value="uk">Украинский</option>
+                  <option value="en">Английский</option>
+                </select>
+              </label>
+              <label>
+                Исключающие слова
+                <input name="exclude" placeholder="casino, spam" />
+              </label>
+            </div>
+            <div className="checks">
+              <label>
+                <input type="checkbox" name="active_only" />
+                <span>Только активные</span>
+              </label>
+              <label>
+                <input type="checkbox" name="public_only" />
+                <span>Только публичные</span>
+              </label>
+              <label>
+                <input type="checkbox" name="writable_only" />
+                <span>Можно писать</span>
+              </label>
+            </div>
+            <button className="launch" disabled={busy || data.running}>
+              {busy
+                ? "Запуск…"
+                : data.running
+                  ? "Сканирование идёт"
+                  : "Запустить сканирование"}
+              <ArrowRight size={18} />
+            </button>
+          </form>
+        </section>
+        <section className="panel" id="runs">
+          <div className="panel-title">
+            <div>
+              <span className="kicker">RUN HISTORY</span>
+              <h2>История запусков</h2>
+            </div>
+            <span className="pill">{runs.length} запусков</span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Начало</th>
+                  <th>Статус</th>
+                  <th>Прогресс</th>
+                  <th>Результаты</th>
+                  <th>Ошибки</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.length ? (
+                  runs.map((r) => (
+                    <tr key={r.id}>
+                      <td>#{r.id}</td>
+                      <td>{fmtDate(r.started_at)}</td>
+                      <td>
+                        <span className={`status ${r.status}`}>{r.status}</span>
+                      </td>
+                      <td>
+                        {r.completed}/{r.total}
+                      </td>
+                      <td>{r.results_count}</td>
+                      <td>{r.errors_count}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="empty">
+                      Запусков пока нет
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="panel" id="accounts">
+          <div className="panel-title">
+            <div>
+              <span className="kicker">ACCOUNT POOL</span>
+              <h2>Telegram-аккаунты</h2>
+            </div>
+            <span className="pill">{accounts.length} сессий</span>
+          </div>
+          <PhoneAuth onDone={refresh} onMessage={setMessage} />
+          <div className="account-list">
+            {accounts.length ? (
+              accounts.map((a, i) => (
+                <article key={a.name}>
+                  <span className="avatar">{i + 1}</span>
+                  <div>
+                    <b>Аккаунт {i + 1}</b>
+                    <small>
+                      {a.name} · {fmtSize(a.size)} · {fmtDate(a.updated_at)}
+                    </small>
+                  </div>
+                  <span className="status ready">загружен</span>
+                  <button
+                    className="icon-danger"
+                    onClick={() => removeAccount(a.name)}
+                    title="Удалить"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </article>
+              ))
+            ) : (
+              <div className="empty">
+                Добавьте ZIP, .session или авторизуйтесь по номеру
+              </div>
+            )}
+          </div>
+        </section>
+        <section className="panel" id="logs">
+          <div className="panel-title">
+            <div>
+              <span className="kicker">LIVE OUTPUT</span>
+              <h2>Логи парсера</h2>
+            </div>
+            <div className="log-actions">
+              <select
+                value={logs.selected}
+                onChange={(e) => loadLog(e.target.value)}
+              >
+                {logs.files.map((x) => (
+                  <option key={x.name}>{x.name}</option>
+                ))}
+              </select>
+              {logs.selected && (
+                <a href={`/download/logs/${encodeURIComponent(logs.selected)}`}>
+                  <Download size={15} />
+                  Скачать
+                </a>
+              )}
+            </div>
+          </div>
+          <pre className="terminal">
+            {logs.content || "Лог появится после запуска сканирования."}
+          </pre>
+        </section>
+        <section className="panel" id="files">
+          <div className="panel-title">
+            <div>
+              <span className="kicker">ARTIFACTS</span>
+              <h2>Артефакты</h2>
+            </div>
+          </div>
+          <div className="actions">
+            <a href="/results">
+              <BarChart3 />
+              Открыть таблицу результатов
+            </a>
+            <a
+              className={!data.report ? "disabled" : ""}
+              href="/download/report"
+            >
+              <Download />
+              Скачать Excel
+            </a>
+            <a
+              className={!data.database ? "disabled" : ""}
+              href="/download/database"
+            >
+              <Database />
+              Скачать SQLite
+            </a>
+            <button className="danger" onClick={clear}>
+              <Trash2 />
+              Удалить все сессии
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+function ResultsPage() {
+  const [data, setData] = useState({
+      rows: [],
+      errors: [],
+      runs: [],
+      total: 0,
+      run_id: null,
+    }),
+    [query, setQuery] = useState(""),
+    [runId, setRunId] = useState(""),
+    [updated, setUpdated] = useState(null);
+  async function load(run = runId, q = query) {
+    const params = new URLSearchParams({ limit: "1000" });
+    if (run) params.set("run_id", run);
+    if (q) params.set("q", q);
+    setData(await api(`/api/results?${params}`));
+    setUpdated(new Date());
+  }
+  useEffect(() => {
+    load(runId, query);
+    const timer = setInterval(() => load(runId, query), 2000);
+    return () => clearInterval(timer);
+  }, [runId, query]);
+  const csv = new URLSearchParams();
+  if (data.run_id) csv.set("run_id", data.run_id);
+  if (query) csv.set("q", query);
+  return (
+    <main className="results-page">
+      <header>
+        <Logo />
+        <div>
+          <a href="/">← Панель управления</a>
+          <h1>Результаты парсинга</h1>
+          <p>
+            Уже собранные данные сохраняются здесь даже при остановке запуска.
+          </p>
+        </div>
+      </header>
+      <section className="result-tools">
+        <select
+          value={runId || data.run_id || ""}
+          onChange={(e) => {
+            setRunId(e.target.value);
+            load(e.target.value, query);
+          }}
+        >
+          {data.runs.map((r) => (
+            <option key={r.id} value={r.id}>
+              Запуск #{r.id} · {fmtDate(r.started_at)}
+            </option>
+          ))}
+        </select>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && load()}
+          placeholder="Поиск по названию или username"
+        />
+        <button onClick={() => load()}>Найти</button>
+        <a href={`/download/results.csv?${csv}`}>
+          <Download size={16} />
+          CSV
+        </a>
+        <a href="/download/report">
+          <Download size={16} />
+          Excel
+        </a>
+      </section>
+      <div className="result-summary">
+        <span className="live-dot" /> LIVE · строк: <b>{data.total}</b> ·
+        ошибок/отфильтровано: <b>{data.errors.length}</b> · обновлено:{" "}
+        <b>{updated ? updated.toLocaleTimeString("ru-RU") : "—"}</b>
+      </div>
+      <section className="result-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Сообщество</th>
+              <th>Тип</th>
+              <th>Участники</th>
+              <th>24 часа</th>
+              <th>7 дней</th>
+              <th>30 дней</th>
+              <th>Авторы</th>
+              <th>Просмотры</th>
+              <th>Реакции</th>
+              <th>ER</th>
+              <th>Рейтинг</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.chat_id}>
+                <td>
+                  <b>{r.title}</b>
+                  {r.username && (
+                    <a href={`https://t.me/${r.username}`} target="_blank">
+                      @{r.username}
+                    </a>
+                  )}
+                </td>
+                <td>{r.chat_type}</td>
+                <td>{r.participants ?? "—"}</td>
+                <td>{r.messages_24h}</td>
+                <td>{r.messages_7d}</td>
+                <td>{r.messages_30d}</td>
+                <td>{r.active_authors}</td>
+                <td>{r.views}</td>
+                <td>{r.reactions}</td>
+                <td>{r.engagement_rate}</td>
+                <td>{r.score}</td>
+              </tr>
+            ))}
+            {!data.rows.length && (
+              <tr>
+                <td colSpan="11" className="empty">
+                  В выбранном запуске пока нет результатов
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  );
+}
+export default function App() {
+  const [loading, setLoading] = useState(true),
+    [user, setUser] = useState(null);
+  useEffect(() => {
+    api("/api/session")
+      .then((x) => {
+        setCsrf(x.csrf);
+        setUser(x.authenticated ? x.username : null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+  async function logout() {
+    try {
+      await api("/api/logout", { method: "POST" });
+    } finally {
+      setUser(null);
+      const s = await api("/api/session");
+      setCsrf(s.csrf);
+    }
+  }
+  if (loading)
+    return (
+      <div className="splash">
+        <Logo />
+      </div>
+    );
+  if (!user) return <Login onLogin={(x) => setUser(x.username)} />;
+  return location.pathname === "/results" ? (
+    <ResultsPage />
+  ) : (
+    <Dashboard user={user} onLogout={logout} />
+  );
+}
