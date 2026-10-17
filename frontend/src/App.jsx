@@ -345,7 +345,10 @@ function Dashboard({ user, onLogout }) {
   return (
     <div className="layout">
       <aside>
-        <Logo />
+        <div className="brand-block">
+          <Logo />
+          <small>Telegram Intelligence</small>
+        </div>
         <nav>
           <a className="active" href="#top">
             <BarChart3 />
@@ -379,6 +382,13 @@ function Dashboard({ user, onLogout }) {
             <small>Администратор</small>
           </div>
         </div>
+        <div className="system-badge">
+          <i />
+          <span>
+            <b>Система онлайн</b>
+            <small>{data.sessions || 0} аккаунтов подключено</small>
+          </span>
+        </div>
         <button className="logout" onClick={onLogout}>
           <LogOut size={17} />
           Выйти
@@ -387,9 +397,9 @@ function Dashboard({ user, onLogout }) {
       <main className="content" id="top">
         <header>
           <div>
-            <span className="kicker">CONTROL CENTER</span>
-            <h1>Центр управления</h1>
-            <p>Мультиаккаунтная Telegram-аналитика</p>
+            <span className="kicker">TELESCOPE / CONTROL CENTER</span>
+            <h1>Добро пожаловать, {user}</h1>
+            <p>Управляйте поиском, аккаунтами и аналитикой из одного окна.</p>
           </div>
           <div className="live">
             <i />
@@ -436,6 +446,7 @@ function Dashboard({ user, onLogout }) {
           </article>
         </section>
         <section className="progress-card">
+          <div className="progress-accent" />
           <div>
             <div>
               <b>{data.live?.phase_label || "Текущая очередь"}</b>
@@ -468,6 +479,26 @@ function Dashboard({ user, onLogout }) {
           <div className="progress">
             <i style={{ width: `${pct}%` }} />
           </div>
+          <div className="phase-track" aria-label="Этапы сканирования">
+            {[
+              ["connecting", "Подключение"],
+              ["searching", "Поиск"],
+              ["processing", "Анализ"],
+              ["exporting", "Отчёт"],
+            ].map(([phase, label]) => {
+              const phases = ["connecting", "searching", "processing", "exporting", "completed"];
+              const current = phases.indexOf(data.live?.phase);
+              const position = phases.indexOf(phase);
+              return (
+                <span
+                  key={phase}
+                  className={current >= position ? "active" : ""}
+                >
+                  <i /> {label}
+                </span>
+              );
+            })}
+          </div>
         </section>
         <section className="panel" id="scan">
           <div className="panel-title">
@@ -480,6 +511,10 @@ function Dashboard({ user, onLogout }) {
             </span>
           </div>
           <form ref={form} onSubmit={start}>
+            <div className="form-step">
+              <span>01</span>
+              <div><b>Источники</b><small>Добавьте аккаунты и список запросов</small></div>
+            </div>
             <div className="uploads">
               <Drop
                 name="sessions"
@@ -520,6 +555,10 @@ function Dashboard({ user, onLogout }) {
               />
               <small>До 20 ссылок 2zie.com, по одной на строку</small>
             </label>
+            <div className="form-step">
+              <span>02</span>
+              <div><b>Фильтры</b><small>Настройте качество будущей выборки</small></div>
+            </div>
             <div className="fields">
               <label>
                 Мин. участников
@@ -762,6 +801,11 @@ function ResultsPage() {
           </p>
         </div>
       </header>
+      <section className="results-overview">
+        <article><span>Найдено</span><strong>{data.total}</strong><small>сообществ в выборке</small></article>
+        <article><span>Ошибки</span><strong>{data.errors.length}</strong><small>недоступно или отфильтровано</small></article>
+        <article><span>Обновление</span><strong>{updated ? updated.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><small>данные обновляются автоматически</small></article>
+      </section>
       <section className="result-tools">
         <select
           value={runId || data.run_id || ""}
