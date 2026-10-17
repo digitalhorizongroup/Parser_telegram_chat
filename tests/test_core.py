@@ -46,6 +46,22 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(db.latest_progress()["completed"], 1)
             db.close()
 
+    def test_retryable_errors_are_not_checkpoints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "test.sqlite3")
+            run_id, _ = db.start_or_resume("retry")
+            db.save_error(run_id, ScanError(10, "Flooded", ErrorKind.FLOOD_WAIT, "wait"))
+            db.save_error(run_id, ScanError(10, "Flooded", ErrorKind.FLOOD_WAIT, "wait again"))
+            self.assertEqual(db.latest_progress()["completed"], 1)
+            db.pause(run_id)
+            resumed_id, resumed = db.start_or_resume("retry")
+            self.assertTrue(resumed)
+            self.assertEqual(resumed_id, run_id)
+            db.clear_retryable_errors(run_id)
+            self.assertEqual(db.processed_ids(run_id), set())
+            self.assertEqual(db.latest_progress()["completed"], 0)
+            db.close()
+
 
 class ExportTests(unittest.TestCase):
     def test_workbook_structure_and_links(self):

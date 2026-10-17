@@ -13,7 +13,7 @@ from app.errors import classify_error
 from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, FilterConfig, ScanError
 from app.progress import update_progress
-from app.rate_limit import TelegramLimiter
+from app.rate_limit import AccountCooldownError, TelegramLimiter
 from app.search import search_groups
 from app.utils import load_keywords
 
@@ -105,6 +105,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
         )
         groups = await search_groups(active_clients, limiters)
         db.set_total(run_id, len(groups))
+        db.clear_retryable_errors(run_id)
         processed = db.processed_ids(run_id)
         completed_count = len(processed)
         update_progress(phase="processing", phase_label="Анализ сообществ", total=len(groups), completed=completed_count, remaining=max(0, len(groups)-completed_count), current="", found=len(groups), error="")
@@ -112,7 +113,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
         async def process(chat, client, limiter):
             nonlocal completed_count
             if chat.id in processed:
-                return
+                return True
             update_progress(current=chat.title)
             try:
                 entity = chat
@@ -146,29 +147,89 @@ async def check_voice_chats(filters: FilterConfig | None = None):
                 else:
                     db.save_error(run_id, ScanError(chat.id, chat.title, ErrorKind.FILTERED, "Не прошёл фильтры"))
                 logger.info("Готово: %s", chat.title)
+            except AccountCooldownError:
+                raise
             except Exception as exc:
                 kind = classify_error(exc)
                 db.save_error(run_id, ScanError(chat.id, chat.title, kind, str(exc)))
                 logger.exception("Ошибка: %s", chat.title)
             finally:
-                completed_count += 1
-                update_progress(completed=completed_count, remaining=max(0, len(groups)-completed_count), current=chat.title)
+                pass
+            completed_count += 1
+            processed.add(chat.id)
+            update_progress(completed=completed_count, remaining=max(0, len(groups)-completed_count), current=chat.title)
+            return True
 
         pending = [chat for chat in groups if chat.id not in processed]
-        public_index = 0
-        tasks = []
+        public_queue = asyncio.Queue()
+        private_pending = []
         for chat in pending:
-            worker_index = public_index % len(active_clients) if chat.username else 0
-            public_index += int(bool(chat.username))
-            tasks.append(process(chat, active_clients[worker_index], limiters[worker_index]))
-        await asyncio.gather(*tasks)
+            (public_queue.put_nowait(chat) if chat.username else private_pending.append(chat))
+
+        cooldowns = []
+
+        async def worker(worker_index):
+            client, limiter = active_clients[worker_index], limiters[worker_index]
+            while True:
+                try:
+                    chat = public_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    await process(chat, client, limiter)
+                except AccountCooldownError as exc:
+                    public_queue.put_nowait(chat)
+                    cooldowns.append(exc.seconds)
+                    logger.warning(
+                        "Аккаунт %s в cooldown на %s сек.; задача вернута в очередь",
+                        worker_index + 1, exc.seconds,
+                    )
+                    return
+                finally:
+                    public_queue.task_done()
+
+        await asyncio.gather(*(worker(i) for i in range(len(active_clients))))
+
+        if public_queue.qsize():
+            wait = min(cooldowns) if cooldowns else min(
+                (item.cooldown_remaining for item in limiters if item.cooldown_remaining), default=0
+            )
+            db.pause(run_id)
+            message = f"Все Telegram-аккаунты ограничены. Повторите запуск через {wait} сек."
+            logger.warning("%s В очереди осталось: %s", message, public_queue.qsize())
+            update_progress(
+                phase="paused", phase_label="Ожидание Telegram", error=message,
+                remaining=max(0, len(groups) - completed_count), cooldown_seconds=wait,
+            )
+            return
+
+        for chat in private_pending:
+            try:
+                await process(chat, active_clients[0], limiters[0])
+            except AccountCooldownError as exc:
+                db.pause(run_id)
+                message = f"Основной Telegram-аккаунт ограничен ещё на {exc.seconds} сек."
+                logger.warning("%s Очередь сохранена.", message)
+                update_progress(
+                    phase="paused", phase_label="Ожидание Telegram", error=message,
+                    remaining=max(0, len(groups) - completed_count), cooldown_seconds=exc.seconds,
+                )
+                return
 
         update_progress(phase="exporting", phase_label="Формирование Excel", current="")
         results, errors = db.results(run_id), db.errors(run_id)
         save_to_excel(results, errors=errors, run_id=run_id)
         db.finish(run_id)
         logger.info("Завершено: %s результа(ов), %s ошибка(ок)", len(results), len(errors))
-        update_progress(phase="completed", phase_label="Завершено", completed=len(groups), total=len(groups), remaining=0, current="")
+        update_progress(phase="completed", phase_label="Завершено", completed=len(groups), total=len(groups), remaining=0, current="", error="")
+    except AccountCooldownError as exc:
+        db.pause(run_id)
+        message = f"Telegram ограничил все аккаунты. Повторите запуск через {exc.seconds} сек."
+        logger.warning(message)
+        update_progress(
+            phase="paused", phase_label="Ожидание Telegram", error=message,
+            cooldown_seconds=exc.seconds,
+        )
     finally:
         await asyncio.gather(*(item.disconnect() for item in active_clients), return_exceptions=True)
         db.close()

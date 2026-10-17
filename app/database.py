@@ -39,10 +39,12 @@ class Database:
 
     def start_or_resume(self, fingerprint: str) -> tuple[int, bool]:
         row = self.connection.execute(
-            "SELECT id FROM runs WHERE fingerprint=? AND status='running' ORDER BY id DESC LIMIT 1",
+            "SELECT id FROM runs WHERE fingerprint=? AND status IN ('running','paused') ORDER BY id DESC LIMIT 1",
             (fingerprint,),
         ).fetchone()
         if row:
+            self.connection.execute("UPDATE runs SET status='running' WHERE id=?", (row["id"],))
+            self.connection.commit()
             return row["id"], True
         cursor = self.connection.execute(
             "INSERT INTO runs(fingerprint, started_at, status) VALUES(?, ?, 'running')",
@@ -86,9 +88,26 @@ class Database:
 
     def _update_completed(self, run_id: int):
         self.connection.execute(
-            "UPDATE runs SET completed=(SELECT COUNT(*) FROM results WHERE run_id=?)+(SELECT COUNT(*) FROM errors WHERE run_id=?) WHERE id=?",
+            """UPDATE runs SET completed=(
+                SELECT COUNT(*) FROM (
+                    SELECT chat_id FROM results WHERE run_id=?
+                    UNION
+                    SELECT chat_id FROM errors WHERE run_id=? AND chat_id IS NOT NULL
+                )
+            ) WHERE id=?""",
             (run_id, run_id, run_id),
         )
+        self.connection.commit()
+
+    def clear_retryable_errors(self, run_id: int):
+        self.connection.execute(
+            "DELETE FROM errors WHERE run_id=? AND kind IN (?, ?)",
+            (run_id, "Лимит Telegram", "Сетевая ошибка"),
+        )
+        self._update_completed(run_id)
+
+    def pause(self, run_id: int):
+        self.connection.execute("UPDATE runs SET status='paused' WHERE id=?", (run_id,))
         self.connection.commit()
 
     def results(self, run_id: int) -> list[ChatResult]:

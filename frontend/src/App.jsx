@@ -436,6 +436,8 @@ function Dashboard({ user, onLogout }) {
             <strong>
               {data.running
                 ? "Работает"
+                : data.status === "paused" || data.live?.phase === "paused"
+                  ? "Пауза Telegram"
                 : data.exit_code > 0
                   ? "Ошибка"
                   : data.status === "completed"
@@ -454,7 +456,7 @@ function Dashboard({ user, onLogout }) {
                 {data.running
                   ? data.live?.current ||
                     `PID ${data.process?.pid} · подготовка`
-                  : data.live?.phase === "failed"
+                  : ["failed", "paused"].includes(data.live?.phase)
                     ? data.live?.error || "Ошибка запуска"
                     : "Нет активного запуска"}
               </span>
@@ -487,7 +489,9 @@ function Dashboard({ user, onLogout }) {
               ["exporting", "Отчёт"],
             ].map(([phase, label]) => {
               const phases = ["connecting", "searching", "processing", "exporting", "completed"];
-              const current = phases.indexOf(data.live?.phase);
+              const current = data.live?.phase === "paused"
+                ? phases.indexOf("processing")
+                : phases.indexOf(data.live?.phase);
               const position = phases.indexOf(phase);
               return (
                 <span

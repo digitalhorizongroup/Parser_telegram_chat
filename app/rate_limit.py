@@ -24,6 +24,10 @@ class TelegramLimiter:
         self._last_call = 0.0
         self._blocked_until = 0.0
 
+    @property
+    def cooldown_remaining(self) -> int:
+        return max(0, int(self._blocked_until - time.monotonic()))
+
     async def _pace(self):
         async with self._lock:
             wait = self.delay - (time.monotonic() - self._last_call)
@@ -32,7 +36,7 @@ class TelegramLimiter:
             self._last_call = time.monotonic()
 
     async def call(self, operation: Callable[[], Awaitable]):
-        remaining = int(self._blocked_until - time.monotonic())
+        remaining = self.cooldown_remaining
         if remaining > 0:
             raise AccountCooldownError(remaining)
         for attempt in range(self.retries + 1):
