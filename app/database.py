@@ -112,5 +112,19 @@ class Database:
         row = self.connection.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else {"status": "idle", "total": 0, "completed": 0}
 
+    def run_history(self, limit: int = 30) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT r.*, COUNT(DISTINCT x.chat_id) AS results_count,
+                   COUNT(DISTINCT e.id) AS errors_count
+            FROM runs r
+            LEFT JOIN results x ON x.run_id=r.id
+            LEFT JOIN errors e ON e.run_id=r.id
+            GROUP BY r.id ORDER BY r.id DESC LIMIT ?
+            """,
+            (max(1, min(limit, 100)),),
+        )
+        return [dict(row) for row in rows]
+
     def close(self):
         self.connection.close()

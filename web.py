@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -28,7 +29,9 @@ app.config.update(MAX_CONTENT_LENGTH=64 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=T
 WEB_USERNAME = os.getenv("WEB_USERNAME", "admin")
 WEB_PASSWORD = os.getenv("WEB_PASSWORD", "change-me")
 process = None
+process_state = {}
 login_attempts = {}
+LOGS_DIR = DATABASE_FILE.parent / "logs"
 
 
 def csrf_token():
@@ -102,12 +105,76 @@ def _progress():
 @app.get("/api/dashboard")
 @api_login_required
 def dashboard():
+    exit_code = process.poll() if process else None
     value = _progress()
     value.update(sessions=len(discover_sessions()), running=bool(process and process.poll() is None),
                  report=EXCEL_FILE.exists(), database=DATABASE_FILE.exists(),
                  keywords=DICTIONARY.stat().st_size if DICTIONARY.exists() else 0,
-                 insecure_defaults=WEB_PASSWORD == "change-me")
+                 insecure_defaults=WEB_PASSWORD == "change-me", exit_code=exit_code,
+                 process=process_state)
     return jsonify(value)
+
+
+@app.get("/api/runs")
+@api_login_required
+def runs():
+    if not DATABASE_FILE.exists():
+        return jsonify(runs=[])
+    db = Database(DATABASE_FILE)
+    values = db.run_history()
+    db.close()
+    return jsonify(runs=values)
+
+
+@app.get("/api/accounts")
+@api_login_required
+def accounts():
+    values = [{"name": path.name, "size": path.stat().st_size,
+               "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()}
+              for path in discover_sessions()]
+    return jsonify(accounts=values)
+
+
+@app.delete("/api/accounts/<name>")
+@api_login_required
+def delete_account(name):
+    require_csrf()
+    if process and process.poll() is None:
+        return jsonify(error="Нельзя удалить аккаунт во время сканирования."), 409
+    target = next((path for path in discover_sessions() if path.name == name), None)
+    if not target:
+        return jsonify(error="Аккаунт не найден."), 404
+    target.unlink()
+    return jsonify(ok=True)
+
+
+def _log_files():
+    if not LOGS_DIR.exists():
+        return []
+    return sorted(LOGS_DIR.glob("run-*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+@app.get("/api/logs")
+@api_login_required
+def logs():
+    files = _log_files()
+    selected = request.args.get("name") or (files[0].name if files else "")
+    target = next((path for path in files if path.name == selected), None)
+    content = ""
+    if target:
+        with target.open("rb") as stream:
+            stream.seek(max(0, target.stat().st_size - 200_000))
+            content = stream.read().decode("utf-8", errors="replace")
+    return jsonify(files=[{"name": path.name, "size": path.stat().st_size,
+                           "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()}
+                          for path in files], selected=selected, content=content)
+
+
+@app.get("/download/logs/<name>")
+@api_login_required
+def download_log(name):
+    target = next((path for path in _log_files() if path.name == name), None)
+    return send_file(target, as_attachment=True) if target else ("Лог не найден", 404)
 
 
 SQLITE_HEADER = b"SQLite format 3\x00"
@@ -216,7 +283,7 @@ def _save_sessions(files, urls=()):
 @app.post("/api/start")
 @api_login_required
 def start():
-    global process
+    global process, process_state
     require_csrf()
     if process and process.poll() is None:
         return jsonify(error="Сканирование уже выполняется."), 409
@@ -242,8 +309,30 @@ def start():
     for flag in ("active_only", "public_only", "writable_only"):
         if request.form.get(flag) in {"true", "on", "1"}:
             cmd.append("--" + flag.replace("_", "-"))
-    process = subprocess.Popen(cmd, cwd=BASE_DIR)
-    return jsonify(ok=True, uploaded=uploaded_count)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    log_path = LOGS_DIR / f"run-{stamp}.log"
+    log_stream = log_path.open("ab", buffering=0)
+    process = subprocess.Popen(cmd, cwd=BASE_DIR, stdout=log_stream, stderr=subprocess.STDOUT)
+    log_stream.close()
+    process_state = {"pid": process.pid, "started_at": datetime.now(timezone.utc).isoformat(),
+                     "log": log_path.name}
+    return jsonify(ok=True, uploaded=uploaded_count, log=log_path.name)
+
+
+@app.post("/api/stop")
+@api_login_required
+def stop():
+    global process
+    require_csrf()
+    if not process or process.poll() is not None:
+        return jsonify(error="Активного запуска нет."), 409
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    return jsonify(ok=True, exit_code=process.poll())
 
 
 @app.delete("/api/sessions")
