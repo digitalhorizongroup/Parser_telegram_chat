@@ -1,0 +1,40 @@
+services:
+  telegram-parser:
+    build: .
+    container_name: telegram-parser
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      TELEGRAM_SESSIONS_DIR: /app/assets/sessions
+      KEYWORDS_FILE: /app/assets/keywords.txt
+      OUTPUT_FILE: /app/assets/groups.xlsx
+      DATABASE_FILE: /app/assets/history.sqlite3
+    ports:
+      - "127.0.0.1:${APP_PORT:-18090}:8080"
+    volumes:
+      - telegram-data:/app/assets
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: telegram-parser-caddy
+    restart: unless-stopped
+    profiles: ["caddy"]
+    depends_on:
+      - telegram-parser
+    environment:
+      DOMAIN: ${DOMAIN:-173-242-48-48.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  telegram-data:
+  caddy-data:
+  caddy-config:

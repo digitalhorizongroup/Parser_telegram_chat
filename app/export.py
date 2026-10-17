@@ -1,164 +1,86 @@
-import openpyxl
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import logging
-from app.config import ELEX_FILE
+from datetime import datetime
+from pathlib import Path
 
-logger = logging.getLogger()
+import openpyxl
+from openpyxl.chart import BarChart, Reference
+from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.styles import Alignment, Font, PatternFill
 
-def save_to_excel(data, filename=ELEX_FILE):
-    try:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Статистика чатов"
+from app.config import EXCEL_FILE
+from app.models import ChatResult
 
-        # Заголовки
-        doc_string = [
-            "💬👥 Телеграм Чат",
-            "📢📺 Телеграм Канал",
-            "🚫 Пропущено",
-            "🎤💬 Войс-чат",
-            "📡🎥 Трансляция",
-            "❌🔒 Не доступно",
-            "⚠️ Ошибка",
-            "✅ Доступно",
-            "❌ Недоступно",
-        ]
+logger = logging.getLogger(__name__)
 
-        doc_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-
-        row_start = 1
-        for line in doc_string:
-            ws.append([line])
-            for cell in ws[row_start]:
-                cell.fill = doc_fill
-            row_start += 1
-
-        headers = ["Название", "ID группы", "Username", "Количество пользователей",
-                   "Можно ли писать сообщения", "Войс", "Тип голосового чата",
-                   "Тип чата", "Дата последнего сообщения", "Сообщений за сутки", "Пользователей онлайн"]
-        
-        ws.append(headers)
-
-        header_fill = PatternFill(start_color="00FFCC00", end_color="00FFCC00", fill_type="solid")
-        header_font = Font(bold=True, color="000000")
-        header_alignment = Alignment(horizontal="center", vertical="center")
-
-        for col_num, cell in enumerate(ws[row_start], start=1): 
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = header_alignment
-
-        chat_count = 0
-        channel_count = 0
-        voice_chat_count = 0
-        streaming_count = 0
-        can_send_messages_count = 0
-        cannot_send_messages_count = 0
-        skipped_count = 0   
-        total_users = 0  # Всего пользователей (чаты + каналы)
-        total_chat_users = 0  # Только чаты
-        total_channel_users = 0  # Только каналы
-        total_online_users = 0  # Всего онлайн пользователей
-        error_count = 0 
-        
+HEADERS = ["Рейтинг", "Название", "Telegram", "ID", "Участники", "Рост", "Можно писать",
+           "Последняя активность", "24ч", "7 дней", "Среднее/7д", "30 дней", "Среднее/30д",
+           "Активные авторы", "Просмотры", "Реакции", "ER, %", "Онлайн", "Язык", "Голосовой чат", "Обсуждение"]
 
 
-        for row in data:
-            error_count += 1
-            chat_type = row[7]  
-            chat_voice_type = row[6]  
-            can_send_messages = row[4]  
-            user_count = int(row[3]) if str(row[3]).isdigit() else 0  # Количество участников
-            online_count = int(row[10]) if str(row[10]).isdigit() else 0  # Онлайн пользователи
-            total_messages_24h = sum(row[9] for row in data if isinstance(row[9], (int, float)))
-
-            if chat_type == "💬👥":
-                chat_count += 1
-                total_chat_users += user_count
-            elif chat_type == "📢📺":
-                channel_count += 1
-                total_channel_users += user_count
-
-            if chat_voice_type == "🎤💬":
-                voice_chat_count += 1
-            elif chat_voice_type == "📡🎥":
-                streaming_count += 1
-
-            if can_send_messages == "Да":
-                can_send_messages_count += 1
-            else:
-                cannot_send_messages_count += 1
-
-            if any("🚫" in str(cell) for cell in row):
-                skipped_count += 1
-
-            total_users += user_count
-            total_online_users += online_count
-
-        ws["C2"] = "💬👥 Телеграм Чат"
-        ws["D2"] = chat_count
-        ws["C3"] = "📢📺 Телеграм Канал"
-        ws["D3"] = channel_count
-        ws["C4"] = "🎤💬 Войс-чат"
-        ws["D4"] = voice_chat_count
-        ws["C5"] = "📡🎥 Трансляция"
-        ws["D5"] = streaming_count
-        ws["C6"] = "✅ Доступно (можно писать)"
-        ws["D6"] = can_send_messages_count
-        ws["C7"] = "❌ Недоступно (нельзя писать)"
-        ws["D7"] = cannot_send_messages_count
-        ws["C8"] = "🚫 Пропущено"
-        ws["D8"] = skipped_count
-        ws["F2"] = "👥 Общее количество участников"
-        ws["G2"] = total_users
-        ws["F3"] = "💬 Общее количество участников в чатах"
-        ws["G3"] = total_chat_users
-        ws["F4"] = "📢 Общее количество участников в каналах"
-        ws["G4"] = total_channel_users
-        ws["F5"] = "🟢 Онлайн пользователей"
-        ws["G5"] = total_online_users
-        ws["F6"] = "📩 Сообщений за 24ч"
-        ws["G6"] = total_messages_24h
-        ws["F7"] = "⚠️ Ошибки"
-        ws["G7"] = error_count
+def _safe(value):
+    return f"'{value}" if isinstance(value, str) and value.startswith(("=", "+", "-", "@")) else value
 
 
-        cell_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-        for cell in ["C2", "D2", "C3", "D3", "C4", "D4", "C5", "D5", "C6", "D6", "C7", "D7", "C8", "D8",
-                     "F2", "G2", "F3", "G3", "F4", "G4", "F5", "G5", "F6", "G6", "F7", "G7"]:
-            ws[cell].fill = cell_fill
-            ws[cell].alignment = Alignment(horizontal="center", vertical="center")
-            ws[cell].font = Font(bold=True)
+def _row(item: ChatResult):
+    return [item.score, _safe(item.title), item.url, item.chat_id, item.participants, item.audience_growth,
+            "Да" if item.can_write else "Нет", item.last_activity, item.messages_24h, item.messages_7d,
+            item.average_7d, item.messages_30d, item.average_30d, item.active_authors, item.views,
+            item.reactions, item.engagement_rate, item.online_users, item.language,
+            item.voice_type or "Нет", item.discussion_url]
 
-        for row in data:
-            ws.append(row)
 
-        data_fill = PatternFill(start_color="00CCFFFF", end_color="00CCFFFF", fill_type="solid")
+def _prepare_sheet(ws, items: list[ChatResult]):
+    ws.append(HEADERS)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="FFC000")
+        cell.alignment = Alignment(horizontal="center")
+    for item in sorted(items, key=lambda x: x.score, reverse=True):
+        ws.append(_row(item))
+        for column in (3, 21):
+            cell = ws.cell(ws.max_row, column)
+            if cell.value:
+                cell.hyperlink = cell.value
+                cell.style = "Hyperlink"
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:U{max(1, ws.max_row)}"
+    ws.conditional_formatting.add(f"I2:I{max(2, ws.max_row)}", ColorScaleRule(
+        start_type="min", start_color="F8696B", mid_type="percentile", mid_value=50,
+        mid_color="FFEB84", end_type="max", end_color="63BE7B"))
+    widths = [12, 34, 28, 14, 14, 12, 16, 25] + [13] * 13
+    for i, width in enumerate(widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
 
-        border = Border(
-            left=Side(border_style="thin", color="000000"),
-            right=Side(border_style="thin", color="000000"),
-            top=Side(border_style="thin", color="000000"),
-            bottom=Side(border_style="thin", color="000000")
-        )
 
-        for row in ws.iter_rows(min_row=row_start + 1, max_row=len(data) + row_start, min_col=1, max_col=len(headers)):
-            for cell in row:
-                cell.fill = data_fill
-                cell.border = border  
+def save_to_excel(data: list[ChatResult], filename=EXCEL_FILE, errors=None, run_id=None):
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True)
+    wb = openpyxl.Workbook()
+    summary = wb.active
+    summary.title = "Сводка"
+    chats = [item for item in data if item.chat_type == "chat"]
+    channels = [item for item in data if item.chat_type == "channel"]
+    summary.append(["Отчёт Telegram Parser", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")])
+    summary.append(["Запуск", run_id or "-"])
+    summary.append(["Чаты", len(chats)])
+    summary.append(["Каналы", len(channels)])
+    summary.append(["Ошибки/фильтры", len(errors or [])])
+    summary.append(["Сообщения за 24ч", sum(x.messages_24h for x in data)])
+    chart = BarChart()
+    chart.title = "Результаты"
+    chart.add_data(Reference(summary, min_col=2, min_row=3, max_row=5))
+    chart.set_categories(Reference(summary, min_col=1, min_row=3, max_row=5))
+    summary.add_chart(chart, "D2")
+    summary.column_dimensions["A"].width = 28
+    summary.column_dimensions["B"].width = 22
 
-        for col in ws.columns:
-            max_length = 0
-            col_letter = col[0].column_letter
-            for cell in col:
-                if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = max_length + 2
-
-        ws.auto_filter.ref = f"A{row_start}:{openpyxl.utils.get_column_letter(len(headers))}{row_start}"
-
-        wb.save(filename)
-        logger.info(f"✅ Данные сохранены в {filename}")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка: {str(e)}")
+    _prepare_sheet(wb.create_sheet("Чаты"), chats)
+    _prepare_sheet(wb.create_sheet("Каналы"), channels)
+    err = wb.create_sheet("Ошибки")
+    err.append(["ID", "Название", "Тип", "Сообщение", "Время"])
+    for item in errors or []:
+        err.append([item.get("chat_id"), _safe(item.get("title")), item.get("kind"), _safe(item.get("message")), item.get("occurred_at")])
+    err.freeze_panes = "A2"
+    err.auto_filter.ref = f"A1:E{max(1, err.max_row)}"
+    wb.save(filename)
+    logger.info("Отчёт сохранён: %s", filename)

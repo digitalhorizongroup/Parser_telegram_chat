@@ -1,0 +1,85 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+import openpyxl
+
+import app.client as client_module
+from app.analytics import detect_language
+from app.database import Database
+from app.export import save_to_excel
+from app.models import ChatResult, ErrorKind, ScanError
+
+
+class DatabaseTests(unittest.TestCase):
+    def test_resume_history_and_growth_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "test.sqlite3")
+            first, resumed = db.start_or_resume("one")
+            self.assertFalse(resumed)
+            db.save_result(first, ChatResult(1, "Test", participants=100))
+            self.assertEqual(db.processed_ids(first), {1})
+            same, resumed = db.start_or_resume("one")
+            self.assertEqual(same, first)
+            self.assertTrue(resumed)
+            db.finish(first)
+            second, _ = db.start_or_resume("two")
+            self.assertEqual(db.previous_participants(1, second), 100)
+            db.save_error(second, ScanError(2, "Bad", ErrorKind.PRIVATE, "private"))
+            self.assertEqual(db.latest_progress()["completed"], 1)
+            db.close()
+
+
+class ExportTests(unittest.TestCase):
+    def test_workbook_structure_and_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.xlsx"
+            item = ChatResult(1, "=unsafe", "example", "chat", 200, messages_24h=8, score=10)
+            save_to_excel([item], path, [{"chat_id": 2, "title": "Bad", "kind": "Error", "message": "x", "occurred_at": "now"}], 7)
+            workbook = openpyxl.load_workbook(path)
+            self.assertEqual(workbook.sheetnames, ["Сводка", "Чаты", "Каналы", "Ошибки"])
+            self.assertEqual(workbook["Чаты"]["C2"].hyperlink.target, "https://t.me/example")
+            self.assertEqual(workbook["Чаты"]["B2"].value, "'=unsafe")
+
+
+class AnalyticsTests(unittest.TestCase):
+    def test_language_detection(self):
+        self.assertEqual(detect_language("Привет это русский текст"), "ru")
+        self.assertEqual(detect_language("This is an English text"), "en")
+        self.assertEqual(detect_language("Привіт, це український текст"), "uk")
+
+
+class SessionTests(unittest.TestCase):
+    def test_discovers_arbitrarily_named_sessions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = client_module.SESSIONS_DIR
+            try:
+                client_module.SESSIONS_DIR = Path(directory)
+                (Path(directory) / "unknown-name.session").touch()
+                (Path(directory) / "123.session").touch()
+                (Path(directory) / "ignore.txt").touch()
+                self.assertEqual(len(client_module.discover_sessions()), 2)
+            finally:
+                client_module.SESSIONS_DIR = original
+
+
+class WebTests(unittest.TestCase):
+    def test_authentication_and_dashboard(self):
+        import web
+        client = web.app.test_client()
+        root = client.get("/")
+        self.assertEqual(root.status_code, 200)
+        root.close()
+        self.assertEqual(client.get("/health").status_code, 200)
+        self.assertEqual(client.get("/api/dashboard").status_code, 401)
+        state = client.get("/api/session").get_json()
+        response = client.post("/api/login", json={
+            "username": web.WEB_USERNAME, "password": web.WEB_PASSWORD,
+        }, headers={"X-CSRF-Token": state["csrf"]})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        self.assertEqual(client.get("/api/dashboard").status_code, 200)
+
+
+if __name__ == "__main__":
+    unittest.main()

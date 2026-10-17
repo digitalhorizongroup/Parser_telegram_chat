@@ -29,19 +29,16 @@ pip install -r requirements.txt
 
 ## Настройка
 
-Укажите параметры Telegram API и остальные настройки в `app/config.py`:
+Создайте файл `.env` в корне проекта (можно скопировать `.env.example`) и укажите параметры Telegram API:
 
-```python
-from pathlib import Path
+```dotenv
+TELEGRAM_API_ID=123456
+TELEGRAM_API_HASH=your_api_hash
 
-API_ID = 123456
-API_HASH = "your_api_hash"
-SESSION_NAME = Path("assets") / "session_name"
-DEVICE_MODE = ""
-SYSTEM_VERSION = ""
-APP_VERSION = ""
-LANG_CODE = ""
-SYSTEM_LANG_CODE = ""
+# Необязательные параметры
+MIN_GROUP_USERS=100
+SEARCH_LIMIT=10
+MAX_MESSAGES_24H=10000
 ```
 
 Добавьте поисковые запросы в `assets/keywords.txt`, по одному ключевому слову на строку.
@@ -52,7 +49,66 @@ SYSTEM_LANG_CODE = ""
 python run.py
 ```
 
+Пример запуска с фильтрами:
+
+```bash
+python run.py --min-users 1000 --min-messages 10 --public-only --language ru --exclude "casino,spam"
+```
+
+Доступны также `--active-only` и `--writable-only`. При повторном запуске с теми же ключами и фильтрами незавершённое сканирование возобновится из SQLite.
+
+### Веб-панель
+
+Интерфейс построен на React + Vite, а Flask предоставляет защищённый JSON API.
+
+Перед запуском задайте в `.env` логин, сильный пароль и случайный секрет:
+
+```dotenv
+WEB_USERNAME=admin
+WEB_PASSWORD=replace_with_a_strong_password
+WEB_SECRET_KEY=replace_with_a_long_random_secret
+```
+
+```bash
+python web.py
+```
+
+Для изменения frontend в режиме разработки:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Для production-сборки:
+
+```bash
+cd frontend
+npm run build
+```
+
+Откройте `http://127.0.0.1:8080`. В панели можно загрузить файл ключевых слов, задать фильтры, видеть прогресс и скачать Excel-отчёт.
+
+В форме можно выбрать сразу несколько Telethon-файлов `.session`. Исходные имена файлов не важны: панель выдаёт им безопасные случайные имена. Все авторизованные сессии работают параллельно, получая свою часть общей очереди. Невалидные или неавторизованные сессии пропускаются.
+
+### Docker
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Панель будет доступна на `http://127.0.0.1:8080`. Сессии, SQLite-история, ключевые слова и отчёты хранятся в постоянном Docker-томе `telegram-data`.
+
+### Тесты
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 После завершения работы парсер создаст Excel-файл со статистикой найденных чатов и каналов.
+При первом запуске Telegram попросит номер телефона, код подтверждения и, если включена, пароль 2FA. Файл сессии хранится локально в `assets/` и не должен публиковаться.
 
 ## Пример отчёта
 
