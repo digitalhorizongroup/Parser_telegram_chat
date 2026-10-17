@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import hashlib
 import hmac
 import io
@@ -132,6 +133,42 @@ def runs():
     values = db.run_history()
     db.close()
     return jsonify(runs=values)
+
+
+@app.get("/api/results")
+@api_login_required
+def result_table():
+    if not DATABASE_FILE.exists():
+        return jsonify(run_id=None, total=0, rows=[], errors=[], runs=[])
+    run_id = request.args.get("run_id", type=int)
+    db = Database(DATABASE_FILE)
+    value = db.result_table(run_id, request.args.get("q", ""),
+                            request.args.get("limit", 200, type=int), request.args.get("offset", 0, type=int))
+    value["runs"] = db.run_history(100)
+    db.close()
+    return jsonify(value)
+
+
+@app.get("/download/results.csv")
+@api_login_required
+def download_results_csv():
+    if not DATABASE_FILE.exists():
+        return "Результатов ещё нет", 404
+    db = Database(DATABASE_FILE)
+    value = db.result_table(request.args.get("run_id", type=int), request.args.get("q", ""), 100000, 0)
+    db.close()
+    fields = ["title", "username", "chat_type", "participants", "messages_24h", "messages_7d",
+              "messages_30d", "active_authors", "views", "reactions", "engagement_rate",
+              "audience_growth", "last_activity", "language", "score"]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in value["rows"]:
+        safe = {key: ("'" + str(row.get(key, "")) if str(row.get(key, "")).startswith(("=", "+", "-", "@")) else row.get(key, "")) for key in fields}
+        writer.writerow(safe)
+    response = app.response_class("\ufeff" + output.getvalue(), mimetype="text/csv; charset=utf-8")
+    response.headers["Content-Disposition"] = f"attachment; filename=results-run-{value['run_id'] or 0}.csv"
+    return response
 
 
 @app.get("/api/accounts")

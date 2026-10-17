@@ -126,5 +126,23 @@ class Database:
         )
         return [dict(row) for row in rows]
 
+    def result_table(self, run_id: int | None = None, query: str = "", limit: int = 200, offset: int = 0) -> dict:
+        if run_id is None:
+            row = self.connection.execute("SELECT id FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+            run_id = row["id"] if row else None
+        if run_id is None:
+            return {"run_id": None, "total": 0, "rows": [], "errors": []}
+        rows = [json.loads(row[0]) for row in self.connection.execute(
+            "SELECT payload FROM results WHERE run_id=? ORDER BY chat_id", (run_id,)
+        )]
+        needle = query.casefold().strip()
+        if needle:
+            rows = [row for row in rows if needle in str(row.get("title", "")).casefold()
+                    or needle in str(row.get("username", "")).casefold()]
+        total = len(rows)
+        rows = rows[max(0, offset):max(0, offset) + max(1, min(limit, 100000))]
+        errors = self.errors(run_id)
+        return {"run_id": run_id, "total": total, "rows": rows, "errors": errors}
+
     def close(self):
         self.connection.close()
