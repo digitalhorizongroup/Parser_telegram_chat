@@ -8,3 +8,4 @@ pytz==2025.1
 python-dotenv==1.1.1
 rsa==4.9
 Telethon==1.39.0
+PySocks==1.7.1

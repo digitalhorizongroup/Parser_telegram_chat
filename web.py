@@ -25,8 +25,9 @@ from openpyxl import Workbook
 from telethon.errors import FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
 from app.client import create_client, discover_sessions
-from app.config import COOLDOWN_FILE, DATABASE_FILE, DICTIONARY, EXCEL_FILE, SESSIONS_DIR
+from app.config import COOLDOWN_FILE, DATABASE_FILE, DICTIONARY, EXCEL_FILE, PROXY_FILE, SESSIONS_DIR
 from app.database import Database
+from app.proxy import ProxyConfig
 from app.rate_limit import CooldownStore
 from app.progress import read_progress
 
@@ -257,6 +258,43 @@ def accounts():
         })
     return jsonify(accounts=values, ready=sum(item["status"] == "ready" for item in values),
                    sleeping=sum(item["status"] == "sleeping" for item in values))
+
+
+@app.get("/api/proxy")
+@api_login_required
+def proxy_settings():
+    return jsonify(proxy=ProxyConfig(PROXY_FILE).load())
+
+
+@app.put("/api/proxy")
+@api_login_required
+def save_proxy_settings():
+    require_csrf()
+    try:
+        value = ProxyConfig(PROXY_FILE).save(request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True, proxy=value,
+                   message="Прокси сохранён и будет применён ко всем Telegram-аккаунтам при следующем подключении.")
+
+
+@app.post("/api/proxy/test")
+@api_login_required
+def test_proxy_settings():
+    require_csrf()
+    try:
+        ProxyConfig(PROXY_FILE).test()
+    except Exception as exc:
+        return jsonify(error=f"Прокси недоступен: {type(exc).__name__}: {exc}"), 400
+    return jsonify(ok=True, message="Прокси работает: соединение с Telegram установлено.")
+
+
+@app.delete("/api/proxy")
+@api_login_required
+def delete_proxy_settings():
+    require_csrf()
+    ProxyConfig(PROXY_FILE).delete()
+    return jsonify(ok=True, message="Общий прокси отключён.")
 
 
 def _login_error(exc):

@@ -16,6 +16,7 @@ from app.database import Database
 from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, ScanError, SearchCandidate
 from app.rate_limit import CooldownStore
+from app.proxy import ProxyConfig
 
 
 def compact_session_bytes():
@@ -140,6 +141,18 @@ class CooldownTests(unittest.TestCase):
             remaining = CooldownStore(path).block("session-a", 172800)
             self.assertGreaterEqual(remaining, 172799)
             self.assertGreaterEqual(CooldownStore(path).remaining("session-a"), 172799)
+
+
+class ProxyTests(unittest.TestCase):
+    def test_proxy_is_persisted_and_password_is_not_exposed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proxy = ProxyConfig(Path(directory) / "proxy.json")
+            public = proxy.save({"type": "socks5", "host": "127.0.0.1", "port": 1080,
+                                 "username": "user", "password": "secret"})
+            self.assertTrue(public["enabled"])
+            self.assertTrue(public["has_password"])
+            self.assertNotIn("password", public)
+            self.assertEqual(proxy.telethon_proxy()[1:3], ("127.0.0.1", 1080))
 
 
 class WebTests(unittest.TestCase):
