@@ -4,21 +4,25 @@ from app.utils import load_keywords
 from app.config import MIN_GROUP_USERS, SEARCH_LIMIT
 from app.progress import update_progress
 from app.rate_limit import AccountCooldownError
+from app.models import SearchCandidate
 
 logger = logging.getLogger()
 
-async def search_groups(clients, limiters):
-    found_groups = {}
+async def search_groups(clients, limiters, db, run_id):
+    found_groups = {item.chat_id: item for item in db.candidates(run_id)}
     keywords = load_keywords()
+    completed_keywords = db.completed_keywords(run_id)
 
     for index, keyword in enumerate(keywords):
+        if keyword in completed_keywords:
+            continue
         keyword_finished = False
         update_progress(
             phase="searching",
             phase_label="Поиск сообществ",
-            completed=index,
+            completed=len(completed_keywords),
             total=len(keywords),
-            remaining=len(keywords) - index,
+            remaining=len(keywords) - len(completed_keywords),
             current=f"Ключевое слово: {keyword}",
             found=len(found_groups),
             error="",
@@ -48,7 +52,16 @@ async def search_groups(clients, limiters):
                     and (chat.participants_count is None or chat.participants_count >= MIN_GROUP_USERS)
                     and chat.id not in found_groups
                 ):
-                    found_groups[chat.id] = chat
+                    candidate = SearchCandidate(
+                        chat_id=chat.id,
+                        title=chat.title,
+                        username=chat.username,
+                        chat_type="channel" if getattr(chat, "broadcast", False) else "chat",
+                        participants=getattr(chat, "participants_count", None),
+                        access_hash=getattr(chat, "access_hash", None),
+                    )
+                    db.save_candidate(run_id, candidate)
+                    found_groups[chat.id] = candidate
                     logger.info(f"✅ Найдено: {chat.title} (@{chat.username if chat.username else 'Приватный'})")
             keyword_finished = True
         except AccountCooldownError:
@@ -57,11 +70,14 @@ async def search_groups(clients, limiters):
             logger.error(f"❌ Ошибка при поиске {keyword}: {e}")
             keyword_finished = True
         finally:
+            if keyword_finished:
+                db.mark_keyword_complete(run_id, keyword)
+                completed_keywords.add(keyword)
             update_progress(
-                completed=index + int(keyword_finished),
+                completed=len(completed_keywords),
                 total=len(keywords),
-                remaining=len(keywords) - index - int(keyword_finished),
+                remaining=len(keywords) - len(completed_keywords),
                 current=(f"Завершено: {keyword}" if keyword_finished else f"Ожидает: {keyword}"),
                 found=len(found_groups),
             )
-    return list(found_groups.values())
+    return db.candidates(run_id)

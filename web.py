@@ -157,7 +157,7 @@ def download_results_csv():
     db = Database(DATABASE_FILE)
     value = db.result_table(request.args.get("run_id", type=int), request.args.get("q", ""), 100000, 0)
     db.close()
-    fields = ["title", "username", "chat_type", "participants", "messages_24h", "messages_7d",
+    fields = ["status", "title", "username", "chat_type", "participants", "messages_24h", "messages_7d",
               "messages_30d", "active_authors", "views", "reactions", "engagement_rate",
               "audience_growth", "last_activity", "language", "score"]
     output = io.StringIO()

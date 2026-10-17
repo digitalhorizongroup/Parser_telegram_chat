@@ -26,6 +26,24 @@ class FilterConfig:
 
 
 @dataclass(slots=True)
+class SearchCandidate:
+    chat_id: int
+    title: str
+    username: str | None = None
+    chat_type: str = "chat"
+    participants: int | None = None
+    access_hash: int | None = None
+
+    @property
+    def id(self) -> int:
+        return self.chat_id
+
+    @property
+    def broadcast(self) -> bool:
+        return self.chat_type == "channel"
+
+
+@dataclass(slots=True)
 class ChatResult:
     chat_id: int
     title: str

@@ -652,7 +652,7 @@ function Dashboard({ user, onLogout }) {
                       <td>
                         {r.completed}/{r.total}
                       </td>
-                      <td>{r.results_count}</td>
+                      <td>{Math.max(r.results_count || 0, r.candidates_count || 0)}</td>
                       <td>{r.errors_count}</td>
                     </tr>
                   ))
@@ -850,6 +850,7 @@ function ResultsPage() {
           <thead>
             <tr>
               <th>Сообщество</th>
+              <th>Статус</th>
               <th>Тип</th>
               <th>Участники</th>
               <th>24 часа</th>
@@ -873,6 +874,11 @@ function ResultsPage() {
                     </a>
                   )}
                 </td>
+                <td>
+                  <span className={`status ${r.status === "processed" ? "ready" : "running"}`}>
+                    {r.status === "processed" ? "Обработано" : "Найдено"}
+                  </span>
+                </td>
                 <td>{r.chat_type}</td>
                 <td>{r.participants ?? "—"}</td>
                 <td>{r.messages_24h}</td>
@@ -887,7 +893,7 @@ function ResultsPage() {
             ))}
             {!data.rows.length && (
               <tr>
-                <td colSpan="11" className="empty">
+                <td colSpan="12" className="empty">
                   В выбранном запуске пока нет результатов
                 </td>
               </tr>

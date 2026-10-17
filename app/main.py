@@ -103,7 +103,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
             completed=0, total=keyword_count, remaining=keyword_count,
             current="Подготовка поиска", found=0, error="",
         )
-        groups = await search_groups(active_clients, limiters)
+        groups = await search_groups(active_clients, limiters, db, run_id)
         db.set_total(run_id, len(groups))
         db.clear_retryable_errors(run_id)
         processed = db.processed_ids(run_id)
@@ -116,9 +116,10 @@ async def check_voice_chats(filters: FilterConfig | None = None):
                 return True
             update_progress(current=chat.title)
             try:
-                entity = chat
-                if client is not active_clients[0] and chat.username:
+                if chat.username:
                     entity = await limiter.call(lambda: client.get_entity(chat.username))
+                else:
+                    entity = await limiter.call(lambda: client.get_input_entity(chat.id))
                 full = await limiter.call(lambda: client(GetFullChannelRequest(entity)))
                 is_channel = bool(getattr(chat, "broadcast", False))
                 can_write = False

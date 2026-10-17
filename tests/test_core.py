@@ -14,7 +14,7 @@ import app.client as client_module
 from app.analytics import detect_language
 from app.database import Database
 from app.export import save_to_excel
-from app.models import ChatResult, ErrorKind, ScanError
+from app.models import ChatResult, ErrorKind, ScanError, SearchCandidate
 
 
 def compact_session_bytes():
@@ -61,6 +61,26 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(db.processed_ids(run_id), set())
             self.assertEqual(db.latest_progress()["completed"], 0)
             db.close()
+
+    def test_candidates_and_keywords_are_persisted_incrementally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "test.sqlite3")
+            run_id, _ = db.start_or_resume("stream")
+            db.save_candidate(run_id, SearchCandidate(42, "Partial", "partial", "channel", 123, 999))
+            db.mark_keyword_complete(run_id, "test keyword")
+            db.close()
+
+            reopened = Database(Path(directory) / "test.sqlite3")
+            self.assertEqual(reopened.completed_keywords(run_id), {"test keyword"})
+            self.assertEqual(reopened.candidates(run_id)[0].title, "Partial")
+            table = reopened.result_table(run_id)
+            self.assertEqual(table["total"], 1)
+            self.assertEqual(table["rows"][0]["status"], "found")
+            reopened.save_result(run_id, ChatResult(42, "Partial", "partial", "channel", 123))
+            table = reopened.result_table(run_id)
+            self.assertEqual(table["total"], 1)
+            self.assertEqual(table["rows"][0]["status"], "processed")
+            reopened.close()
 
 
 class ExportTests(unittest.TestCase):

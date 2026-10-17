@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.models import ChatResult, ScanError
+from app.models import ChatResult, ScanError, SearchCandidate
 
 
 class Database:
@@ -32,8 +32,20 @@ class Database:
                 id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
                 chat_id INTEGER, title TEXT, kind TEXT, message TEXT, occurred_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS candidates (
+                run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                chat_id INTEGER NOT NULL, payload TEXT NOT NULL,
+                discovered_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, chat_id)
+            );
+            CREATE TABLE IF NOT EXISTS search_keywords (
+                run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                keyword TEXT NOT NULL, completed_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, keyword)
+            );
             CREATE INDEX IF NOT EXISTS idx_results_chat ON results(chat_id);
             CREATE INDEX IF NOT EXISTS idx_runs_fingerprint ON runs(fingerprint, status);
+            CREATE INDEX IF NOT EXISTS idx_candidates_run ON candidates(run_id);
         """)
         self.connection.commit()
 
@@ -71,6 +83,34 @@ class Database:
         if not rows:
             return None
         return json.loads(rows["payload"]).get("participants")
+
+    def save_candidate(self, run_id: int, candidate: SearchCandidate):
+        self.connection.execute(
+            "INSERT OR REPLACE INTO candidates(run_id,chat_id,payload,discovered_at) VALUES(?,?,?,?)",
+            (run_id, candidate.chat_id, json.dumps({
+                "chat_id": candidate.chat_id, "title": candidate.title,
+                "username": candidate.username, "chat_type": candidate.chat_type,
+                "participants": candidate.participants, "access_hash": candidate.access_hash,
+            }, ensure_ascii=False), datetime.now(timezone.utc).isoformat()),
+        )
+        self.connection.commit()
+
+    def candidates(self, run_id: int) -> list[SearchCandidate]:
+        rows = self.connection.execute(
+            "SELECT payload FROM candidates WHERE run_id=? ORDER BY rowid", (run_id,)
+        )
+        return [SearchCandidate(**json.loads(row[0])) for row in rows]
+
+    def completed_keywords(self, run_id: int) -> set[str]:
+        rows = self.connection.execute("SELECT keyword FROM search_keywords WHERE run_id=?", (run_id,))
+        return {row[0] for row in rows}
+
+    def mark_keyword_complete(self, run_id: int, keyword: str):
+        self.connection.execute(
+            "INSERT OR REPLACE INTO search_keywords(run_id,keyword,completed_at) VALUES(?,?,?)",
+            (run_id, keyword, datetime.now(timezone.utc).isoformat()),
+        )
+        self.connection.commit()
 
     def save_result(self, run_id: int, result: ChatResult):
         self.connection.execute(
@@ -135,7 +175,8 @@ class Database:
         rows = self.connection.execute(
             """
             SELECT r.*, COUNT(DISTINCT x.chat_id) AS results_count,
-                   COUNT(DISTINCT e.id) AS errors_count
+                   COUNT(DISTINCT e.id) AS errors_count,
+                   (SELECT COUNT(*) FROM candidates c WHERE c.run_id=r.id) AS candidates_count
             FROM runs r
             LEFT JOIN results x ON x.run_id=r.id
             LEFT JOIN errors e ON e.run_id=r.id
@@ -147,13 +188,34 @@ class Database:
 
     def result_table(self, run_id: int | None = None, query: str = "", limit: int = 200, offset: int = 0) -> dict:
         if run_id is None:
-            row = self.connection.execute("SELECT id FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+            row = self.connection.execute(
+                """SELECT r.id FROM runs r
+                   ORDER BY (EXISTS(SELECT 1 FROM results x WHERE x.run_id=r.id)
+                          OR EXISTS(SELECT 1 FROM candidates c WHERE c.run_id=r.id)) DESC,
+                          r.id DESC LIMIT 1"""
+            ).fetchone()
             run_id = row["id"] if row else None
         if run_id is None:
             return {"run_id": None, "total": 0, "rows": [], "errors": []}
-        rows = [json.loads(row[0]) for row in self.connection.execute(
-            "SELECT payload FROM results WHERE run_id=? ORDER BY chat_id", (run_id,)
+        candidates = [json.loads(row[0]) for row in self.connection.execute(
+            "SELECT payload FROM candidates WHERE run_id=? ORDER BY rowid", (run_id,)
         )]
+        by_id = {}
+        for candidate in candidates:
+            partial = ChatResult(
+                chat_id=candidate["chat_id"], title=candidate["title"],
+                username=candidate.get("username"), chat_type=candidate.get("chat_type", "chat"),
+                participants=candidate.get("participants"),
+            ).to_dict()
+            partial["status"] = "found"
+            by_id[partial["chat_id"]] = partial
+        for row in self.connection.execute(
+            "SELECT payload FROM results WHERE run_id=? ORDER BY chat_id", (run_id,)
+        ):
+            result = json.loads(row[0])
+            result["status"] = "processed"
+            by_id[result["chat_id"]] = result
+        rows = list(by_id.values())
         needle = query.casefold().strip()
         if needle:
             rows = [row for row in rows if needle in str(row.get("title", "")).casefold()
