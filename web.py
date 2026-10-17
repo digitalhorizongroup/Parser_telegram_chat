@@ -25,8 +25,9 @@ from openpyxl import Workbook
 from telethon.errors import FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
 from app.client import create_client, discover_sessions
-from app.config import DATABASE_FILE, DICTIONARY, EXCEL_FILE, SESSIONS_DIR
+from app.config import COOLDOWN_FILE, DATABASE_FILE, DICTIONARY, EXCEL_FILE, SESSIONS_DIR
 from app.database import Database
+from app.rate_limit import CooldownStore
 from app.progress import read_progress
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -243,10 +244,19 @@ def download_results_xlsx():
 @app.get("/api/accounts")
 @api_login_required
 def accounts():
-    values = [{"name": path.name, "size": path.stat().st_size,
-               "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()}
-              for path in discover_sessions()]
-    return jsonify(accounts=values)
+    store = CooldownStore(COOLDOWN_FILE)
+    values = []
+    for path in discover_sessions():
+        remaining = store.remaining(str(path))
+        values.append({
+            "name": path.name, "size": path.stat().st_size,
+            "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+            "status": "sleeping" if remaining else "ready",
+            "cooldown_seconds": remaining,
+            "wakes_at": datetime.fromtimestamp(time.time() + remaining, timezone.utc).isoformat() if remaining else None,
+        })
+    return jsonify(accounts=values, ready=sum(item["status"] == "ready" for item in values),
+                   sleeping=sum(item["status"] == "sleeping" for item in values))
 
 
 def _login_error(exc):

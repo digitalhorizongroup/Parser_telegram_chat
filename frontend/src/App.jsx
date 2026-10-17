@@ -8,6 +8,7 @@ import {
   FileText,
   History,
   LogOut,
+  Moon,
   Play,
   Radio,
   ScrollText,
@@ -39,6 +40,14 @@ const fmtDate = (value) =>
   value ? new Date(value).toLocaleString("ru-RU") : "—";
 const fmtSize = (value) =>
   value < 1024 ? `${value} Б` : `${(value / 1024).toFixed(1)} КБ`;
+const fmtDuration = (seconds) => {
+  const value = Math.max(0, Number(seconds) || 0);
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  return [days && `${days} д.`, hours && `${hours} ч.`, `${minutes} мин.`]
+    .filter(Boolean).join(" ");
+};
 function Login({ onLogin }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -701,8 +710,9 @@ function Dashboard({ user, onLogout }) {
               <span className="kicker">ACCOUNT POOL</span>
               <h2>Telegram-аккаунты</h2>
             </div>
-            <span className="pill">{accounts.length} сессий</span>
+            <span className="pill">{accounts.filter((a) => a.status === "ready").length} доступны · {accounts.filter((a) => a.status === "sleeping").length} спят</span>
           </div>
+          {accounts.some((a) => a.status === "sleeping") && <div className="sleep-notice"><Moon size={18}/><div><b>Некоторые аккаунты отдыхают после FloodWait</b><small>Парсер автоматически пропустит их и снова подключит после окончания cooldown.</small></div></div>}
           <PhoneAuth onDone={refresh} onMessage={setMessage} />
           <div className="account-list">
             {accounts.length ? (
@@ -715,7 +725,7 @@ function Dashboard({ user, onLogout }) {
                       {a.name} · {fmtSize(a.size)} · {fmtDate(a.updated_at)}
                     </small>
                   </div>
-                  <span className="status ready">загружен</span>
+                  {a.status === "sleeping" ? <span className="status sleeping" title={`Пробуждение: ${fmtDate(a.wakes_at)}`}><Moon size={12}/>спит ещё {fmtDuration(a.cooldown_seconds)}</span> : <span className="status ready">готов</span>}
                   <button
                     className="icon-danger"
                     onClick={() => removeAccount(a.name)}
