@@ -246,15 +246,19 @@ def download_results_xlsx():
 @api_login_required
 def accounts():
     store = CooldownStore(COOLDOWN_FILE)
+    proxies = ProxyConfig(PROXY_FILE)
     values = []
     for path in discover_sessions():
         remaining = store.remaining(str(path))
+        assigned = proxies.assigned(str(path))
         values.append({
             "name": path.name, "size": path.stat().st_size,
             "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             "status": "sleeping" if remaining else "ready",
             "cooldown_seconds": remaining,
             "wakes_at": datetime.fromtimestamp(time.time() + remaining, timezone.utc).isoformat() if remaining else None,
+            "proxy": ({"id": assigned["id"], "type": assigned["type"], "host": assigned["host"],
+                       "port": assigned["port"]} if assigned else None),
         })
     return jsonify(accounts=values, ready=sum(item["status"] == "ready" for item in values),
                    sleeping=sum(item["status"] == "sleeping" for item in values))
@@ -263,10 +267,11 @@ def accounts():
 @app.get("/api/proxy")
 @api_login_required
 def proxy_settings():
-    return jsonify(proxy=ProxyConfig(PROXY_FILE).load())
+    values = ProxyConfig(PROXY_FILE).list()
+    return jsonify(proxies=values, total=len(values))
 
 
-@app.put("/api/proxy")
+@app.post("/api/proxy")
 @api_login_required
 def save_proxy_settings():
     require_csrf()
@@ -275,7 +280,7 @@ def save_proxy_settings():
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(ok=True, proxy=value,
-                   message="Прокси сохранён и будет применён ко всем Telegram-аккаунтам при следующем подключении.")
+                   message="Прокси добавлен в пул и будет автоматически назначен аккаунтам.")
 
 
 @app.post("/api/proxy/test")
@@ -283,18 +288,18 @@ def save_proxy_settings():
 def test_proxy_settings():
     require_csrf()
     try:
-        ProxyConfig(PROXY_FILE).test()
+        ProxyConfig(PROXY_FILE).test(str((request.get_json(silent=True) or {}).get("id", "")))
     except Exception as exc:
         return jsonify(error=f"Прокси недоступен: {type(exc).__name__}: {exc}"), 400
     return jsonify(ok=True, message="Прокси работает: соединение с Telegram установлено.")
 
 
-@app.delete("/api/proxy")
+@app.delete("/api/proxy/<proxy_id>")
 @api_login_required
-def delete_proxy_settings():
+def delete_proxy_settings(proxy_id):
     require_csrf()
-    ProxyConfig(PROXY_FILE).delete()
-    return jsonify(ok=True, message="Общий прокси отключён.")
+    ProxyConfig(PROXY_FILE).delete(proxy_id)
+    return jsonify(ok=True, message="Прокси удалён из пула.")
 
 
 def _login_error(exc):

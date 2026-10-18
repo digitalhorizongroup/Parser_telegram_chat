@@ -258,46 +258,42 @@ function PhoneAuth({ onDone, onMessage }) {
     </div>
   );
 }
-function ProxySettings({ value, onDone, onMessage }) {
+function ProxySettings({ values, onDone, onMessage }) {
   const [form, setForm] = useState({ type: "socks5", host: "", port: "", username: "", password: "" });
   const [busy, setBusy] = useState("");
-  useEffect(() => {
-    setForm({ type: value?.type || "socks5", host: value?.host || "", port: value?.port || "",
-      username: value?.username || "", password: "" });
-  }, [value]);
   const change = (key) => (event) => setForm({ ...form, [key]: event.target.value });
   async function save() {
     setBusy("save");
     try {
-      const result = await api("/api/proxy", { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, keep_password: value?.has_password && !form.password }) });
-      onMessage({ type: "ok", text: result.message }); onDone();
+      const result = await api("/api/proxy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      onMessage({ type: "ok", text: result.message }); setForm({ type: "socks5", host: "", port: "", username: "", password: "" }); onDone();
     } catch (error) { onMessage({ type: "error", text: error.message }); }
     finally { setBusy(""); }
   }
-  async function test() {
-    setBusy("test");
-    try { const result = await api("/api/proxy/test", { method: "POST" }); onMessage({ type: "ok", text: result.message }); }
+  async function test(id) {
+    setBusy(id);
+    try { const result = await api("/api/proxy/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); onMessage({ type: "ok", text: result.message }); }
     catch (error) { onMessage({ type: "error", text: error.message }); }
     finally { setBusy(""); }
   }
-  async function disable() {
-    setBusy("delete");
-    try { const result = await api("/api/proxy", { method: "DELETE" }); onMessage({ type: "ok", text: result.message }); onDone(); }
+  async function disable(id) {
+    setBusy(`delete-${id}`);
+    try { const result = await api(`/api/proxy/${encodeURIComponent(id)}`, { method: "DELETE" }); onMessage({ type: "ok", text: result.message }); onDone(); }
     catch (error) { onMessage({ type: "error", text: error.message }); }
     finally { setBusy(""); }
   }
   return <div className="proxy-card">
-    <div className="proxy-heading"><span><Wifi size={18}/></span><div><b>Общий прокси для всех аккаунтов</b><small>{value ? `Включён · ${value.type.toUpperCase()} · ${value.host}:${value.port}` : "Не настроен · соединение идёт напрямую"}</small></div><i className={value ? "on" : ""}>{value ? "активен" : "выключен"}</i></div>
-    <div className="proxy-fields"><select value={form.type} onChange={change("type")}><option value="socks5">SOCKS5</option><option value="http">HTTP</option></select><input value={form.host} onChange={change("host")} placeholder="IP или домен"/><input value={form.port} onChange={change("port")} inputMode="numeric" placeholder="Порт"/><input value={form.username} onChange={change("username")} placeholder="Логин (необязательно)"/><input value={form.password} onChange={change("password")} type="password" placeholder={value?.has_password ? "Пароль сохранён" : "Пароль (необязательно)"}/></div>
-    <div className="proxy-actions"><button type="button" onClick={save} disabled={!!busy || !form.host || !form.port}>{busy === "save" ? "Сохраняем…" : "Сохранить"}</button><button type="button" className="secondary" onClick={test} disabled={!!busy || !value}>{busy === "test" ? "Проверяем…" : "Проверить соединение"}</button>{value && <button type="button" className="danger" onClick={disable} disabled={!!busy}>Отключить</button>}<small>Новые подключения всех Telegram-сессий будут идти через этот прокси.</small></div>
+    <div className="proxy-heading"><span><Wifi size={18}/></span><div><b>Пул прокси</b><small>Автоматическое равномерное распределение между аккаунтами</small></div><i className={values.length ? "on" : ""}>{values.length} шт.</i></div>
+    <div className="proxy-fields"><select value={form.type} onChange={change("type")}><option value="socks5">SOCKS5</option><option value="http">HTTP</option></select><input value={form.host} onChange={change("host")} placeholder="IP или домен"/><input value={form.port} onChange={change("port")} inputMode="numeric" placeholder="Порт"/><input value={form.username} onChange={change("username")} placeholder="Логин"/><input value={form.password} onChange={change("password")} type="password" placeholder="Пароль"/></div>
+    <div className="proxy-actions"><button type="button" onClick={save} disabled={!!busy || !form.host || !form.port}>{busy === "save" ? "Добавляем…" : "+ Добавить прокси"}</button><small>Можно добавить один или несколько прокси.</small></div>
+    <div className="proxy-list">{values.map((item, index)=><article key={item.id}><span>{index+1}</span><div><b>{item.host}:{item.port}</b><small>{item.type.toUpperCase()} · {item.username || "без авторизации"}</small></div><button className="secondary" onClick={()=>test(item.id)} disabled={!!busy}>{busy===item.id?"Проверка…":"Проверить"}</button><button className="icon-danger" onClick={()=>disable(item.id)} disabled={!!busy}><Trash2 size={15}/></button></article>)}{!values.length&&<div className="empty">Добавьте первый прокси</div>}</div>
   </div>;
 }
 function Dashboard({ user, onLogout }) {
   const [data, setData] = useState(initial),
     [runs, setRuns] = useState([]),
     [accounts, setAccounts] = useState([]),
-    [proxy, setProxy] = useState(null),
+    [proxies, setProxies] = useState([]),
     [logs, setLogs] = useState({ files: [], content: "", selected: "" }),
     [message, setMessage] = useState(null),
     [busy, setBusy] = useState(false),
@@ -317,7 +313,7 @@ function Dashboard({ user, onLogout }) {
       setRuns(r.runs);
       setAccounts(a.accounts);
       setLogs(l);
-      setProxy(p.proxy);
+      setProxies(p.proxies || []);
     } catch (e) {
       if (e.message === "authentication_required") onLogout();
     }
@@ -751,8 +747,7 @@ function Dashboard({ user, onLogout }) {
             <span className="pill">{accounts.filter((a) => a.status === "ready").length} доступны · {accounts.filter((a) => a.status === "sleeping").length} спят</span>
           </div>
           {accounts.some((a) => a.status === "sleeping") && <div className="sleep-notice"><Moon size={18}/><div><b>Некоторые аккаунты отдыхают после FloodWait</b><small>Парсер автоматически пропустит их и снова подключит после окончания cooldown.</small></div></div>}
-          <ProxySettings value={proxy} onDone={refresh} onMessage={setMessage}/>
-          <PhoneAuth onDone={refresh} onMessage={setMessage} />
+          <div className="accounts-split"><div className="account-side"><div className="side-title"><Users size={18}/><div><b>Добавление аккаунтов</b><small>Авторизация и действующие сессии</small></div></div><PhoneAuth onDone={refresh} onMessage={setMessage} />
           <div className="account-list">
             {accounts.length ? (
               accounts.map((a, i) => (
@@ -761,7 +756,7 @@ function Dashboard({ user, onLogout }) {
                   <div>
                     <b>Аккаунт {i + 1}</b>
                     <small>
-                      {a.name} · {fmtSize(a.size)} · {fmtDate(a.updated_at)}
+                      {a.name} · {fmtSize(a.size)} · {a.proxy ? `прокси ${a.proxy.host}:${a.proxy.port}` : "без прокси"}
                     </small>
                   </div>
                   {a.status === "sleeping" ? <span className="status sleeping" title={`Пробуждение: ${fmtDate(a.wakes_at)}`}><Moon size={12}/>спит ещё {fmtDuration(a.cooldown_seconds)}</span> : <span className="status ready">готов</span>}
@@ -779,7 +774,7 @@ function Dashboard({ user, onLogout }) {
                 Добавьте ZIP, .session или авторизуйтесь по номеру
               </div>
             )}
-          </div>
+          </div></div><div className="proxy-side"><ProxySettings values={proxies} onDone={refresh} onMessage={setMessage}/></div></div>
         </section>}
         {page === "logs" && <section className="panel page-panel" id="logs">
           <div className="panel-title">

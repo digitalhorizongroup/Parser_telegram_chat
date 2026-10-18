@@ -153,6 +153,9 @@ class ProxyTests(unittest.TestCase):
             self.assertTrue(public["has_password"])
             self.assertNotIn("password", public)
             self.assertEqual(proxy.telethon_proxy()[1:3], ("127.0.0.1", 1080))
+            proxy.save({"type": "http", "host": "127.0.0.2", "port": 8080})
+            self.assertEqual(len(proxy.list()), 2)
+            self.assertEqual(proxy.assigned("account-a")["id"], proxy.assigned("account-a")["id"])
 
 
 class WebTests(unittest.TestCase):

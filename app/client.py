@@ -19,7 +19,7 @@ def create_client(session: Path | str = SESSION_NAME) -> TelegramClient:
         app_version=APP_VERSION,
         lang_code=LANG_CODE,
         system_lang_code=SYSTEM_LANG_CODE,
-        proxy=ProxyConfig(PROXY_FILE).telethon_proxy(),
+        proxy=ProxyConfig(PROXY_FILE).telethon_proxy(str(session)),
     )
     # Telethon 1.39 does not expose lang_pack in TelegramClient.__init__,
     # but keeps it on the InitConnection request sent before authorization.
