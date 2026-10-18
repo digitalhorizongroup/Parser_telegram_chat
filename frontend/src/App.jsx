@@ -458,7 +458,7 @@ function Dashboard({ user, onLogout }) {
           Выйти
         </button>
       </aside>
-      <main className="content" id="top">
+      <main className="content full-width-page" id="top">
         <header>
           <div>
             <span className="kicker">TELESCOPE / {pageMeta[0]}</span>
@@ -867,7 +867,7 @@ function ResultsPage() {
   if (data.run_id) csv.set("run_id", data.run_id);
   if (query) csv.set("q", query);
   return (
-    <main className="results-page">
+    <main className="results-page full-width-page">
       <header>
         <Logo />
         <div>
