@@ -15,13 +15,11 @@ import {
   ScrollText,
   ShieldCheck,
   Trash2,
-  UploadCloud,
   Users,
   Wifi,
 } from "lucide-react";
 import { api, setCsrf } from "./api";
 import ExcelView from "./ExcelView";
-import "./url-field.css";
 import "./management.css";
 import "./phone-auth.css";
 import "./results.css";
@@ -297,7 +295,6 @@ function Dashboard({ user, onLogout }) {
     [logs, setLogs] = useState({ files: [], content: "", selected: "" }),
     [message, setMessage] = useState(null),
     [busy, setBusy] = useState(false),
-    [sessionNames, setSessionNames] = useState([]),
     [keywordName, setKeywordName] = useState("");
   const form = useRef();
   async function refresh() {
@@ -603,28 +600,17 @@ function Dashboard({ user, onLogout }) {
           <form ref={form} onSubmit={start}>
             <div className="form-step">
               <span>01</span>
-              <div><b>Источники</b><small>Добавьте аккаунты и список запросов</small></div>
+              <div><b>Источники</b><small>Проверьте аккаунты и выберите список запросов</small></div>
             </div>
-            <div className="uploads">
-              <Drop
-                name="sessions"
-                multiple
-                accept=".session,.zip,application/zip"
-                icon={UploadCloud}
-                title={
-                  sessionNames.length
-                    ? `${sessionNames.length} файлов выбрано`
-                    : "Telegram аккаунты"
-                }
-                subtitle={
-                  sessionNames.length
-                    ? sessionNames.join(", ")
-                    : "Несколько ZIP или .session — имена не важны"
-                }
-                onChange={(e) =>
-                  setSessionNames([...e.target.files].map((x) => x.name))
-                }
-              />
+            <div className="scan-source-grid">
+              <article className="account-source-card">
+                <span><Users size={20} /></span>
+                <div>
+                  <b>{accounts.length} Telegram-аккаунтов</b>
+                  <small>{accounts.filter((a) => a.status === "ready").length} готовы к работе</small>
+                </div>
+                <a href="/accounts">Управлять</a>
+              </article>
               <Drop
                 name="keywords"
                 accept=".txt"
@@ -634,17 +620,6 @@ function Dashboard({ user, onLogout }) {
                 onChange={(e) => setKeywordName(e.target.files[0]?.name || "")}
               />
             </div>
-            <label className="url-field">
-              Ссылки на ZIP с аккаунтами
-              <textarea
-                name="session_urls"
-                rows="4"
-                placeholder={
-                  "https://2zie.com/file/.../account.zip\nhttps://2zie.com/file/.../account2.zip"
-                }
-              />
-              <small>До 20 ссылок 2zie.com, по одной на строку</small>
-            </label>
             <div className="form-step">
               <span>02</span>
               <div><b>Фильтры</b><small>Настройте качество будущей выборки</small></div>
