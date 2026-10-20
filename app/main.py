@@ -63,6 +63,10 @@ def _matches(result: ChatResult, filters: FilterConfig) -> bool:
     return result.messages_24h >= filters.min_messages_24h
 
 
+def _search_is_complete(keywords: list[str], completed_keywords: set[str]) -> bool:
+    return bool(keywords) and set(keywords).issubset(completed_keywords)
+
+
 async def check_voice_chats(filters: FilterConfig | None = None):
     filters = filters or FilterConfig()
     db = Database(DATABASE_FILE)
@@ -118,13 +122,22 @@ async def check_voice_chats(filters: FilterConfig | None = None):
             LONG_FLOODWAIT_THRESHOLD, LONG_ACCOUNT_REST_SECONDS,
         ) for index, client in enumerate(active_clients)]
         logger.info("Активных сессий: %s", len(active_clients))
-        keyword_count = len(load_keywords())
-        update_progress(
-            phase="searching", phase_label="Поиск сообществ", active_sessions=len(active_clients),
-            completed=0, total=keyword_count, remaining=keyword_count,
-            current="Подготовка поиска", found=0, error="",
-        )
-        groups = await search_groups(active_clients, limiters, db, run_id)
+        keywords = load_keywords()
+        completed_keywords = db.completed_keywords(run_id)
+        search_complete = _search_is_complete(keywords, completed_keywords)
+        if search_complete:
+            groups = db.candidates(run_id)
+            logger.info("Поиск уже завершён; переходим сразу к анализу %s сообществ", len(groups))
+        else:
+            keyword_count = len(keywords)
+            update_progress(
+                phase="searching", phase_label="Поиск сообществ", active_sessions=len(active_clients),
+                completed=len(completed_keywords), total=keyword_count,
+                remaining=max(0, keyword_count - len(completed_keywords)),
+                current="Продолжение поиска" if completed_keywords else "Подготовка поиска",
+                found=len(db.candidates(run_id)), error="",
+            )
+            groups = await search_groups(active_clients, limiters, db, run_id)
         db.set_total(run_id, len(groups))
         db.clear_retryable_errors(run_id)
         processed = db.processed_ids(run_id)

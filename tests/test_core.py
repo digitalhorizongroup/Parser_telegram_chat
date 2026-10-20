@@ -48,6 +48,15 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await _can_write(Client(), object(), Limiter()))
 
 
+class ResumeTests(unittest.TestCase):
+    def test_completed_search_can_skip_directly_to_analysis(self):
+        from app.main import _search_is_complete
+
+        self.assertTrue(_search_is_complete(["one", "two"], {"one", "two"}))
+        self.assertFalse(_search_is_complete(["one", "two"], {"one"}))
+        self.assertFalse(_search_is_complete([], set()))
+
+
 def compact_session_bytes():
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "compact.session"
