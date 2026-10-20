@@ -9,11 +9,11 @@ import {
   History,
   LogOut,
   Moon,
+  Pause,
   Play,
   Radio,
   ScrollText,
   ShieldCheck,
-  Square,
   Trash2,
   UploadCloud,
   Users,
@@ -376,14 +376,14 @@ function Dashboard({ user, onLogout }) {
     }
     await launch(new FormData(form.current), true);
   }
-  async function stop() {
-    if (!confirm("Остановить текущий запуск? Прогресс останется в SQLite."))
+  async function pause() {
+    if (!confirm("Поставить сканирование на паузу? Прогресс будет сохранён."))
       return;
     try {
-      await api("/api/stop", { method: "POST" });
+      await api("/api/pause", { method: "POST" });
       setMessage({
         type: "ok",
-        text: "Запуск остановлен. Его можно продолжить повторным запуском.",
+        text: "Сканирование на паузе. Прогресс сохранён — можно продолжить позже.",
       });
       refresh();
     } catch (x) {
@@ -544,9 +544,9 @@ function Dashboard({ user, onLogout }) {
             <div className="run-controls">
               <b>{total ? `${pct}%` : "…"}</b>
               {data.running && (
-                <button className="stop" onClick={stop}>
-                  <Square size={14} />
-                  Остановить
+                <button className="pause-control" onClick={pause}>
+                  <Pause size={14} />
+                  Пауза
                 </button>
               )}
               {!data.running && total > done && ["running", "paused"].includes(data.status) && (

@@ -434,7 +434,7 @@ h2 {
   font-size: 25px;
   color: var(--mint);
 }
-.stop,
+.pause-control,
 .icon-danger {
   border: 1px solid #6a3140;
   background: #311820;
@@ -442,7 +442,7 @@ h2 {
   border-radius: 9px;
   cursor: pointer;
 }
-.stop {
+.pause-control {
   display: flex;
   align-items: center;
   gap: 7px;

@@ -622,8 +622,9 @@ def start():
 
 
 @app.post("/api/stop")
+@app.post("/api/pause")
 @api_login_required
-def stop():
+def pause_scan():
     global process
     require_csrf()
     if not process or process.poll() is not None:
