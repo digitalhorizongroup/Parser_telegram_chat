@@ -408,6 +408,19 @@ function Dashboard({ user, onLogout }) {
       setMessage({ type: "error", text: x.message });
     }
   }
+  async function assignRole(name, role) {
+    try {
+      await api(`/api/accounts/${encodeURIComponent(name)}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      setMessage({ type: "ok", text: "Назначение аккаунта сохранено." });
+      refresh();
+    } catch (x) {
+      setMessage({ type: "error", text: x.message });
+    }
+  }
   return (
     <div className="layout">
       <aside>
@@ -606,8 +619,8 @@ function Dashboard({ user, onLogout }) {
               <article className="account-source-card">
                 <span><Users size={20} /></span>
                 <div>
-                  <b>{accounts.length} Telegram-аккаунтов</b>
-                  <small>{accounts.filter((a) => a.status === "ready").length} готовы к работе</small>
+                  <b>{accounts.filter((a) => a.role === "parser").length} аккаунтов для парсинга</b>
+                  <small>{accounts.filter((a) => a.role === "parser" && a.status === "ready").length} готовы к работе</small>
                 </div>
                 <a href="/accounts">Управлять</a>
               </article>
@@ -749,6 +762,15 @@ function Dashboard({ user, onLogout }) {
                       {a.name} · {fmtSize(a.size)} · {a.proxy ? `прокси ${a.proxy.host}:${a.proxy.port}` : "без прокси"}
                     </small>
                   </div>
+                  <label className="account-role">
+                    <span>Назначение</span>
+                    <select value={a.role || "parser"} onChange={(e) => assignRole(a.name, e.target.value)} disabled={data.running}>
+                      <option value="parser">Парсинг</option>
+                      <option value="outreach">Рассылки</option>
+                      <option value="autoresponder">Автоответчик</option>
+                      <option value="reserve">Резерв</option>
+                    </select>
+                  </label>
                   {a.status === "sleeping" ? <span className="status sleeping" title={`Пробуждение: ${fmtDate(a.wakes_at)}`}><Moon size={12}/>спит ещё {fmtDuration(a.cooldown_seconds)}</span> : <span className="status ready">готов</span>}
                   <button
                     className="icon-danger"

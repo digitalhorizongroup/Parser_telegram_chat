@@ -1,7 +1,8 @@
 from pathlib import Path
 import logging
 
-from app.config import (API_HASH, API_ID, APP_VERSION, DEVICE_MODEL, LANG_CODE,
+from app.account_roles import AccountRoles
+from app.config import (ACCOUNT_ROLES_FILE, API_HASH, API_ID, APP_VERSION, DEVICE_MODEL, LANG_CODE,
                         LANG_PACK, SESSION_NAME, SESSIONS_DIR, SYSTEM_LANG_CODE,
                         SYSTEM_VERSION, PROXY_FILE)
 from app.proxy import ProxyConfig
@@ -35,9 +36,11 @@ def discover_sessions() -> list[Path]:
                   if path.is_file() and path.suffix.lower() == ".session" and not path.name.startswith("pending_"))
 
 
-def create_clients() -> tuple[list[TelegramClient], bool]:
-    sessions = discover_sessions()
-    if sessions:
+def create_clients(role: str = "parser") -> tuple[list[TelegramClient], bool]:
+    roles = AccountRoles(ACCOUNT_ROLES_FILE)
+    all_sessions = discover_sessions()
+    sessions = [path for path in all_sessions if roles.get(path.name) == role]
+    if all_sessions:
         clients = []
         for path in sessions:
             try:

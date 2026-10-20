@@ -24,8 +24,9 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 from openpyxl import Workbook
 from telethon.errors import FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
+from app.account_roles import AccountRoles
 from app.client import create_client, discover_sessions
-from app.config import COOLDOWN_FILE, DATABASE_FILE, DICTIONARY, EXCEL_FILE, PROXY_FILE, SESSIONS_DIR
+from app.config import ACCOUNT_ROLES_FILE, COOLDOWN_FILE, DATABASE_FILE, DICTIONARY, EXCEL_FILE, PROXY_FILE, SESSIONS_DIR
 from app.database import Database
 from app.proxy import ProxyConfig
 from app.rate_limit import CooldownStore
@@ -247,6 +248,7 @@ def download_results_xlsx():
 def accounts():
     store = CooldownStore(COOLDOWN_FILE)
     proxies = ProxyConfig(PROXY_FILE)
+    roles = AccountRoles(ACCOUNT_ROLES_FILE)
     values = []
     for path in discover_sessions():
         remaining = store.remaining(str(path))
@@ -256,12 +258,30 @@ def accounts():
             "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             "status": "sleeping" if remaining else "ready",
             "cooldown_seconds": remaining,
+            "role": roles.get(path.name),
             "wakes_at": datetime.fromtimestamp(time.time() + remaining, timezone.utc).isoformat() if remaining else None,
             "proxy": ({"id": assigned["id"], "type": assigned["type"], "host": assigned["host"],
                        "port": assigned["port"]} if assigned else None),
         })
     return jsonify(accounts=values, ready=sum(item["status"] == "ready" for item in values),
-                   sleeping=sum(item["status"] == "sleeping" for item in values))
+                   sleeping=sum(item["status"] == "sleeping" for item in values),
+                   roles={role: sum(item["role"] == role for item in values) for role in AccountRoles.ROLES})
+
+
+@app.patch("/api/accounts/<name>/role")
+@api_login_required
+def update_account_role(name):
+    require_csrf()
+    if process and process.poll() is None:
+        return jsonify(error="Нельзя менять назначение во время сканирования."), 409
+    target = next((path for path in discover_sessions() if path.name == name), None)
+    if not target:
+        return jsonify(error="Аккаунт не найден."), 404
+    try:
+        role = AccountRoles(ACCOUNT_ROLES_FILE).set(name, str((request.get_json(silent=True) or {}).get("role", "")))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True, role=role)
 
 
 @app.get("/api/proxy")
@@ -405,6 +425,7 @@ def delete_account(name):
     if not target:
         return jsonify(error="Аккаунт не найден."), 404
     target.unlink()
+    AccountRoles(ACCOUNT_ROLES_FILE).delete(name)
     return jsonify(ok=True)
 
 

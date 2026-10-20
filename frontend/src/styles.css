@@ -897,6 +897,23 @@ tbody tr:last-child td {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.account-role {
+  display: grid;
+  gap: 3px;
+  flex: 0 0 150px;
+}
+.account-role span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.account-role select {
+  min-width: 145px;
+  padding: 7px 9px;
+  font-size: 11px;
+}
 .icon-danger {
   padding: 8px;
 }

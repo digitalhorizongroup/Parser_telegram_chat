@@ -116,6 +116,8 @@
   .account-list .status {
     display: none;
   }
+  .account-list article { flex-wrap: wrap; }
+  .account-role { flex: 1 1 150px; }
   .proxy-fields {
     grid-template-columns: 1fr;
   }

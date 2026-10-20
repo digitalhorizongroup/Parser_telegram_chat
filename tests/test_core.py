@@ -18,6 +18,7 @@ from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, ScanError, SearchCandidate
 from app.rate_limit import CooldownStore
 from app.proxy import ProxyConfig
+from app.account_roles import AccountRoles
 
 
 class PermissionTests(unittest.IsolatedAsyncioTestCase):
@@ -203,6 +204,20 @@ class ProxyTests(unittest.TestCase):
             proxy.save({"type": "http", "host": "127.0.0.2", "port": 8080})
             self.assertEqual(len(proxy.list()), 2)
             self.assertEqual(proxy.assigned("account-a")["id"], proxy.assigned("account-a")["id"])
+
+
+class AccountRoleTests(unittest.TestCase):
+    def test_roles_are_persisted_and_default_to_parser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "roles.json"
+            roles = AccountRoles(path)
+            self.assertEqual(roles.get("one.session"), "parser")
+            self.assertEqual(roles.set("one.session", "autoresponder"), "autoresponder")
+            self.assertEqual(AccountRoles(path).get("one.session"), "autoresponder")
+            with self.assertRaises(ValueError):
+                roles.set("one.session", "invalid")
+            roles.delete("one.session")
+            self.assertEqual(roles.get("one.session"), "parser")
 
 
 class WebTests(unittest.TestCase):
