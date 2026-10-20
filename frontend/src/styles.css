@@ -448,6 +448,21 @@ h2 {
   gap: 7px;
   padding: 7px 10px;
 }
+.resume {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid #2d6a5d;
+  border-radius: 9px;
+  background: #15352e;
+  color: #baf7e6;
+  cursor: pointer;
+}
+.resume:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .phase-track {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

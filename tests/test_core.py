@@ -8,6 +8,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 import openpyxl
+from telethon.errors import UserNotParticipantError
 from telethon.sessions import SQLiteSession
 
 import app.client as client_module
@@ -17,6 +18,34 @@ from app.export import save_to_excel
 from app.models import ChatResult, ErrorKind, ScanError, SearchCandidate
 from app.rate_limit import CooldownStore
 from app.proxy import ProxyConfig
+
+
+class PermissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_non_member_public_group_is_read_only(self):
+        from app.main import _can_write
+
+        class Client:
+            async def get_permissions(self, entity, participant):
+                raise UserNotParticipantError(request=None)
+
+        class Limiter:
+            async def call(self, operation):
+                return await operation()
+
+        self.assertFalse(await _can_write(Client(), object(), Limiter()))
+
+    async def test_member_write_permission_is_preserved(self):
+        from app.main import _can_write
+
+        class Client:
+            async def get_permissions(self, entity, participant):
+                return type("Permissions", (), {"send_messages": True})()
+
+        class Limiter:
+            async def call(self, operation):
+                return await operation()
+
+        self.assertTrue(await _can_write(Client(), object(), Limiter()))
 
 
 def compact_session_bytes():
@@ -62,6 +91,15 @@ class DatabaseTests(unittest.TestCase):
             db.clear_retryable_errors(run_id)
             self.assertEqual(db.processed_ids(run_id), set())
             self.assertEqual(db.latest_progress()["completed"], 0)
+            db.close()
+
+    def test_active_runs_can_be_paused_after_process_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "test.sqlite3")
+            run_id, _ = db.start_or_resume("interrupted")
+            db.pause_active_runs()
+            self.assertEqual(db.latest_progress()["id"], run_id)
+            self.assertEqual(db.latest_progress()["status"], "paused")
             db.close()
 
     def test_candidates_and_keywords_are_persisted_incrementally(self):

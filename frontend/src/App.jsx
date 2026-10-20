@@ -351,14 +351,16 @@ function Dashboard({ user, onLogout }) {
     }[page];
   async function start(e) {
     e.preventDefault();
+    await launch(new FormData(e.currentTarget), false);
+  }
+  async function launch(body, resumed) {
     setBusy(true);
     setMessage(null);
     try {
-      const body = new FormData(e.currentTarget);
       const result = await api("/api/start", { method: "POST", body });
       setMessage({
         type: "ok",
-        text: `Запуск создан. Новых аккаунтов: ${result.uploaded}. Лог: ${result.log}`,
+        text: `${resumed ? "Сканирование продолжено" : "Запуск создан"}. Новых аккаунтов: ${result.uploaded}. Лог: ${result.log}`,
       });
       refresh();
     } catch (x) {
@@ -366,6 +368,13 @@ function Dashboard({ user, onLogout }) {
     } finally {
       setBusy(false);
     }
+  }
+  async function resume() {
+    if (!form.current) {
+      location.href = "/parsing";
+      return;
+    }
+    await launch(new FormData(form.current), true);
   }
   async function stop() {
     if (!confirm("Остановить текущий запуск? Прогресс останется в SQLite."))
@@ -538,6 +547,12 @@ function Dashboard({ user, onLogout }) {
                 <button className="stop" onClick={stop}>
                   <Square size={14} />
                   Остановить
+                </button>
+              )}
+              {!data.running && total > done && ["running", "paused"].includes(data.status) && (
+                <button className="resume" onClick={resume} disabled={busy}>
+                  <Play size={14} />
+                  {busy ? "Продолжаем…" : "Продолжить"}
                 </button>
               )}
             </div>

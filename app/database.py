@@ -164,6 +164,10 @@ class Database:
         self.connection.execute("UPDATE runs SET status='paused' WHERE id=?", (run_id,))
         self.connection.commit()
 
+    def pause_active_runs(self):
+        self.connection.execute("UPDATE runs SET status='paused' WHERE status='running'")
+        self.connection.commit()
+
     def results(self, run_id: int) -> list[ChatResult]:
         rows = self.connection.execute("SELECT payload FROM results WHERE run_id=?", (run_id,))
         return [ChatResult(**json.loads(row[0])) for row in rows]

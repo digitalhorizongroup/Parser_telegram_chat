@@ -633,6 +633,10 @@ def stop():
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         process.kill()
+    if DATABASE_FILE.exists():
+        db = Database(DATABASE_FILE)
+        db.pause_active_runs()
+        db.close()
     return jsonify(ok=True, exit_code=process.poll())
 
 

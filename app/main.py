@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 
+from telethon.errors import UserNotParticipantError
 from telethon.tl.functions.channels import GetFullChannelRequest
 
 from app.analytics import collect_analytics
@@ -20,6 +21,16 @@ from app.utils import load_keywords
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+async def _can_write(client, entity, limiter) -> bool:
+    try:
+        permissions = await limiter.call(lambda: client.get_permissions(entity, "me"))
+    except UserNotParticipantError:
+        # Public groups can be inspected without joining. In that case Telegram
+        # cannot return participant permissions, which simply means we cannot write.
+        return False
+    return bool(getattr(permissions, "send_messages", False))
 
 
 def _fingerprint(filters: FilterConfig) -> str:
@@ -134,8 +145,7 @@ async def check_voice_chats(filters: FilterConfig | None = None):
                 is_channel = bool(getattr(chat, "broadcast", False))
                 can_write = False
                 if not is_channel:
-                    permissions = await limiter.call(lambda: client.get_permissions(entity, "me"))
-                    can_write = bool(getattr(permissions, "send_messages", False))
+                    can_write = await _can_write(client, entity, limiter)
                 analytics = await limiter.call(lambda: collect_analytics(client, entity))
                 participants = getattr(full.full_chat, "participants_count", None)
                 previous = db.previous_participants(chat.id, run_id)
